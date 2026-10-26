@@ -591,7 +591,7 @@ const MOCK = {
 
 let state = {
   enabled: false, voice: true, lang: 'zh', volume: 0.8,
-  theme: 'auto', tray: 'gold', version: '0.1.0', repo: '',
+  theme: 'auto', tray: 'gold', version: '0.1.0', repo: '', trusted: false,
 };
 let count = 0;
 
@@ -713,6 +713,35 @@ function setEnabled(on) {
 function showNotice(text) {
   el('noticeText').textContent = text;
   el('notice').classList.add('show');
+}
+
+function setTrustUi(trusted) {
+  state.trusted = trusted;
+  el('trustState').textContent = trusted ? '已授权' : '未授权';
+  el('trustState').style.color = trusted ? 'var(--ok)' : 'var(--accent)';
+}
+
+// 辅助功能授权是在系统设置里完成的，用户切走再切回来时页面不会重新加载，
+// 所以未授权期间要主动轮询，一拿到授权就停。
+let trustTimer = null;
+function watchTrust(trusted) {
+  if (trusted) {
+    if (trustTimer) { clearInterval(trustTimer); trustTimer = null; }
+    return;
+  }
+  if (trustTimer) return;
+
+  trustTimer = setInterval(async () => {
+    try {
+      const s = await invoke('get_status');
+      if (s.trusted) {
+        setTrustUi(true);
+        el('notice').classList.remove('show');
+        clearInterval(trustTimer);
+        trustTimer = null;
+      }
+    } catch (_) { /* 查不到就下次再试 */ }
+  }, 1500);
 }
 
 async function toggleEnabled() {
@@ -961,8 +990,8 @@ if (PREVIEW) {
     el('aboutBackend').textContent = s.hook_backend;
     el('menuVersion').textContent = '版本 ' + s.version;
     el('sideVersion').textContent = 'v' + s.version;
-    el('trustState').textContent = s.trusted ? '已授权' : '未授权';
-    el('trustState').style.color = s.trusted ? 'var(--ok)' : 'var(--accent)';
+    setTrustUi(s.trusted);
+    watchTrust(s.trusted);
 
     state.version = s.version;
     state.repo = s.update_repo || '';
@@ -985,6 +1014,16 @@ if (PREVIEW) {
     console.error(e);
   }
 })();
+
+// 从系统设置切回应用时立刻复查一次，不用等轮询。
+window.addEventListener('focus', async () => {
+  if (state.trusted) return;
+  try {
+    const s = await invoke('get_status');
+    setTrustUi(s.trusted);
+    watchTrust(s.trusted);
+  } catch (_) { /* 忽略 */ }
+});
 </script>
 </body>
 </html>

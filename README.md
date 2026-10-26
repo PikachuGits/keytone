@@ -86,6 +86,33 @@ macOS 不允许应用静默监听全局输入，必须手动开启辅助功能�
 > **每次重新编译后授权都会失效** —— TCC 认的是二进制签名，重新编译签名就变了。
 > 日常使用建议 `cargo build --release` 一次之后不要再重编，否则每次都要重新勾选。
 
+### 授权了却一直显示「未授权」？
+
+按顺序排查：
+
+1. **确认 app 是被签名过的**。TCC 的辅助功能授权必须绑定一个稳定的代码签名身份，
+   `.app` 包如果没有签名（只有内层可执行文件带链接器的 ad-hoc 签名），
+   系统无法把授权和这个 app 关联起来，勾选后 `AXIsProcessTrusted()` 依然返回 false。
+
+   ```sh
+   codesign --verify --verbose=2 /Applications/KeyTone.app
+   # 正常输出：valid on disk / satisfies its Designated Requirement
+   ```
+
+   如果报 `code object is not signed at all`，说明构建时没签名 —— 本仓库的
+   `tauri.conf.json` 里 `bundle.macOS.signingIdentity` 设为 `"-"` 即可，CI 也会在
+   发布前校验签名，未签名直接失败。
+
+2. **删掉旧条目重新添加**。签名变了（比如重装、重新编译）之后，
+   系统设置里的旧勾选会变成僵尸条目，指向一个已经不存在的签名。
+   在「辅助功能」列表里选中 KeyTone，点「−」删掉，再点「＋」重新添加 `/Applications/KeyTone.app`。
+
+3. **确认没有跑在 DMG 里**。直接从磁盘映像双击运行会触发 App Translocation，
+   系统会把它挂到一个随机临时路径下，授权绑在那个路径上，下次启动就失效。
+   必须先拖进 `/Applications` 再运行。
+
+4. 授权后**切回应用会自动刷新**（应用每 1.5 秒复查一次），不需要重启。
+
 ---
 
 ## 命令行

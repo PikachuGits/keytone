@@ -34,14 +34,31 @@ jobs:
       - name: 安装 Tauri CLI
         run: npm install
 
-      - name: 打包并发布
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # tauri.conf.json 里配了 bundle.macOS.signingIdentity = "-"，
+      # 让 Tauri 打包时对整个 .app 做 ad-hoc 签名。
+      # 不签的话 TCC 无法把辅助功能授权绑定到 app，
+      # 用户会遇到「勾选了却一直显示未授权」。
+      - name: 构建通用包
+        run: npm run tauri build -- --target universal-apple-darwin
+
+      - name: 校验签名（未签名直接失败，不发布）
+        run: |
+          set -euo pipefail
+          APP="src-tauri/target/universal-apple-darwin/release/bundle/macos/KeyTone.app"
+          echo "--- codesign --verify ---"
+          codesign --verify --verbose=2 "$APP"
+          echo "--- 签名详情 ---"
+          codesign -dv --verbose=2 "$APP" 2>&1 | tee /tmp/sig.txt
+          grep -q "Identifier=com.keytone.app" /tmp/sig.txt \
+            || { echo "::error::签名标识符不是 com.keytone.app"; exit 1; }
+          echo "签名校验通过"
+
+      - name: 发布
+        uses: softprops/action-gh-release@v2
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: KeyTone ${{ github.ref_name }}
-          releaseBody: |
+          name: KeyTone ${{ github.ref_name }}
+          draft: false
+          body: |
             macOS 通用二进制，Apple Silicon 与 Intel 通用。
 
             **首次打开被系统拦下时**，右键点图标选「打开」，或执行：
@@ -50,10 +67,11 @@ jobs:
             xattr -dr com.apple.quarantine /Applications/KeyTone.app
             ```
 
-            应用未做代码签名与公证，这是正常的绕过方式。
+            应用已做 ad-hoc 签名但未做公证，Gatekeeper 仍会提示一次，这是正常的。
 
-            使用前需要在「系统设置 → 隐私与安全性 → 辅助功能」里勾选 KeyTone，
-            否则无法捕获全局按键。
-          releaseDraft: false
-          prerelease: false
-          args: --target universal-apple-darwin
+            **授权步骤**：启动后点开关 → 系统弹出提示 → 前往
+            「系统设置 → 隐私与安全性 → 辅助功能」勾选 KeyTone → 回到应用再点一次开关。
+
+            若勾选后仍显示未授权，把列表里的 KeyTone 用「−」删掉再重新添加一次。
+          files: |
+            src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
