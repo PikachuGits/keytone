@@ -246,6 +246,32 @@ cargo test         # 单元测试
 cargo run          # 启动
 ```
 
+### 打包与发布
+
+打一个 `v` 开头的标签推上去，GitHub Actions 会自动构建 macOS 通用二进制
+（Apple Silicon + Intel）并创建 Release：
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+产物是 `KeyTone_<版本>_universal.dmg`，挂在 Release 页面下。
+
+推送标签前记得先把 `src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 里的
+`version` 改掉——应用内的版本号来自 `Cargo.toml`。
+
+### 检查更新
+
+应用内「设置 → 更新」默认指向本仓库的 Releases，
+点「检查更新」会读 `https://api.github.com/repos/PikachuGits/keytone/releases/latest`
+并和本地版本逐段比对。
+
+实现上直接用系统 `curl`，没有引入 HTTP 依赖。检查到新版本后显示「下载」按钮，
+点了用浏览器打开发布页——**不会静默自动安装**，下载和覆盖由用户自己完成。
+
+> 该功能读的是 **已发布** 的 Release，草稿状态不会返回。
+
 ---
 
 ## 许可

@@ -25,11 +25,18 @@
     }
   },
   "bundle": {
-    "active": false,
-    "targets": "all",
+    "active": true,
+    "targets": ["app", "dmg"],
     "icon": [
       "icons/icon.icns",
       "icons/icon.png"
-    ]
+    ],
+    "category": "Utility",
+    "shortDescription": "键盘与鼠标音效引擎",
+    "longDescription": "把每一次敲击和点击都变成声音。常驻菜单栏，全局捕获键盘与鼠标事件，支持独立音色包、多采样随机与键位语音播报。",
+    "copyright": "Copyright © 2026 PikachuGits",
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    }
   }
 }

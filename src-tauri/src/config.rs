@@ -18,8 +18,8 @@ pub struct Settings {
     pub voice_enabled: bool,
     #[serde(default = "default_lang")]
     pub voice_lang: String,
-    /// 更新检查用的 GitHub 仓库（owner/repo），留空表示未配置。
-    #[serde(default)]
+    /// 更新检查用的 GitHub 仓库（owner/repo），留空表示不检查。
+    #[serde(default = "default_update_repo")]
     pub update_repo: String,
     /// 主题：auto / light / dark
     #[serde(default = "default_theme")]
@@ -49,6 +49,11 @@ fn default_tray() -> String {
     "mono".into()
 }
 
+/// 默认更新源。留空会让「检查更新」永远提示未配置，所以内置官方仓库。
+fn default_update_repo() -> String {
+    "PikachuGits/keytone".into()
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -58,7 +63,7 @@ impl Default for Settings {
             enabled: false,
             voice_enabled: default_true(),
             voice_lang: default_lang(),
-            update_repo: String::new(),
+            update_repo: default_update_repo(),
             theme: default_theme(),
             tray_style: default_tray(),
         }
