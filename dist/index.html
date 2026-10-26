@@ -1,0 +1,990 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>KeyTone</title>
+<script>
+  // 先按本地缓存把主题定下来，避免加载瞬间闪一下白/黑。
+  (function () {
+    var saved = localStorage.getItem('ks-theme') || 'auto';
+    var sys = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    document.documentElement.dataset.theme = saved === 'auto' ? sys : saved;
+  })();
+</script>
+<style>
+  :root {
+    --radius: 12px;
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+  }
+
+  /* ---------- 深色 ---------- */
+  :root[data-theme="dark"] {
+    --bg: #17100d;
+    --side: #1c1310;
+    --panel: #241a16;
+    --panel-2: #2c201a;
+    --panel-3: #352620;
+    --line: rgba(255, 170, 110, 0.13);
+    --line-strong: rgba(255, 170, 110, 0.28);
+    --text: #f7eee7;
+    --muted: #a9907f;
+    --faint: #6d5a4f;
+    --accent: #ff6b2c;
+    --accent-2: #ffb020;
+    --red: #e33b22;
+    --ok: #35b37e;
+    --ok-text: #8fe3bd;
+    --accent-soft: rgba(255, 107, 44, 0.14);
+    --accent-line: rgba(255, 107, 44, 0.32);
+    --ok-soft: rgba(53, 179, 126, 0.12);
+    --ok-line: rgba(53, 179, 126, 0.45);
+    --warn-soft: rgba(255, 176, 32, 0.09);
+    --warn-line: rgba(255, 176, 32, 0.32);
+    --warn-text: #ffd98a;
+    --chip-bg: rgba(255, 107, 44, 0.14);
+    --chip-line: rgba(255, 107, 44, 0.3);
+    --chip-text: #ffc9a8;
+    --chip-up-bg: rgba(255, 255, 255, 0.035);
+    --mouse-bg: rgba(255, 176, 32, 0.13);
+    --mouse-line: rgba(255, 176, 32, 0.32);
+    --mouse-text: #ffd98a;
+    --switch-off: #352620;
+    --knob: #8b7263;
+    --overlay: rgba(10, 6, 4, 0.62);
+    --shadow: rgba(0, 0, 0, 0.45);
+    --track: rgba(255, 170, 110, 0.18);
+    --hover: rgba(255, 170, 110, 0.06);
+  }
+
+  /* ---------- 浅色 ---------- */
+  :root[data-theme="light"] {
+    --bg: #fbf6f1;
+    --side: #f4ebe3;
+    --panel: #ffffff;
+    --panel-2: #faf4ee;
+    --panel-3: #f2e7dc;
+    --line: rgba(150, 80, 40, 0.14);
+    --line-strong: rgba(150, 80, 40, 0.3);
+    --text: #2b1a12;
+    --muted: #8a7062;
+    --faint: #b39a8a;
+    --accent: #e8511d;
+    --accent-2: #c97a00;
+    --red: #c33018;
+    --ok: #0e7a55;
+    --ok-text: #0b6b4a;
+    --accent-soft: rgba(232, 81, 29, 0.1);
+    --accent-line: rgba(232, 81, 29, 0.28);
+    --ok-soft: rgba(14, 122, 85, 0.1);
+    --ok-line: rgba(14, 122, 85, 0.35);
+    --warn-soft: rgba(201, 122, 0, 0.09);
+    --warn-line: rgba(201, 122, 0, 0.3);
+    --warn-text: #96600a;
+    --chip-bg: rgba(232, 81, 29, 0.09);
+    --chip-line: rgba(232, 81, 29, 0.24);
+    --chip-text: #b8410f;
+    --chip-up-bg: rgba(0, 0, 0, 0.03);
+    --mouse-bg: rgba(201, 122, 0, 0.1);
+    --mouse-line: rgba(201, 122, 0, 0.28);
+    --mouse-text: #8a5600;
+    --switch-off: #e6d8cb;
+    --knob: #b09a88;
+    --overlay: rgba(60, 40, 30, 0.35);
+    --shadow: rgba(120, 70, 40, 0.18);
+    --track: rgba(150, 80, 40, 0.16);
+    --hover: rgba(150, 80, 40, 0.05);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font);
+    font-size: 13px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    user-select: none;
+    overflow: hidden;
+    transition: background .18s, color .18s;
+  }
+  button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+  select, input { font-family: inherit; }
+
+  .app { display: flex; height: 100%; }
+
+  /* ---------- 侧边栏 ---------- */
+  .side {
+    width: 188px; flex: none;
+    background: var(--side);
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    padding: 48px 12px 14px;
+    -webkit-app-region: drag;
+    transition: background .18s;
+  }
+  .brand { display: flex; align-items: center; gap: 9px; padding: 0 8px 18px; }
+  .brand-logo { width: 26px; height: 26px; flex: none; color: var(--accent); }
+  .brand .name { font-size: 13px; font-weight: 500; letter-spacing: -0.01em; white-space: nowrap; }
+  .brand .tag { font-size: 11px; color: var(--muted); }
+  nav { display: flex; flex-direction: column; gap: 2px; -webkit-app-region: no-drag; }
+  .nav-item {
+    display: flex; align-items: center; gap: 9px;
+    padding: 8px 10px; border-radius: 8px;
+    font-size: 13px; color: var(--muted);
+    transition: background .13s, color .13s;
+    text-align: left; width: 100%;
+  }
+  .nav-item:hover { background: var(--hover); color: var(--text); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent); }
+  .nav-item svg { width: 15px; height: 15px; flex: none; opacity: .9; }
+  .side-foot { margin-top: auto; padding: 0 10px; font-size: 11px; color: var(--faint); -webkit-app-region: no-drag; }
+
+  /* ---------- 主区 ---------- */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 20px 26px 14px; -webkit-app-region: drag;
+  }
+  .top h1 { font-size: 18px; font-weight: 500; letter-spacing: -0.01em; }
+  .top .sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+  .top-right { display: flex; align-items: center; gap: 12px; -webkit-app-region: no-drag; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 7px 14px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel);
+    font-size: 12px; transition: all .15s;
+  }
+  .pill:hover { border-color: var(--line-strong); }
+  .pill.on { border-color: var(--ok-line); background: var(--ok-soft); color: var(--ok-text); }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
+  .pill.on .dot { background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+
+  .avatar-wrap { position: relative; }
+  .avatar {
+    width: 34px; height: 34px; border-radius: 50%; overflow: hidden;
+    background: linear-gradient(140deg, var(--accent-2), var(--red));
+    display: grid; place-items: center;
+    border: 1px solid rgba(255, 255, 255, .18);
+    transition: transform .13s;
+  }
+  .avatar:hover { transform: scale(1.05); }
+  .avatar-mark { width: 22px; height: 22px; color: #fff; display: block; }
+  .menu {
+    position: absolute; right: 0; top: 42px; width: 190px;
+    background: var(--panel); border: 1px solid var(--line-strong);
+    border-radius: 10px; padding: 5px; z-index: 40;
+    box-shadow: 0 12px 30px var(--shadow);
+    display: none;
+  }
+  .menu.show { display: block; }
+  .menu button {
+    display: block; width: 100%; text-align: left;
+    padding: 8px 10px; border-radius: 7px; font-size: 12.5px;
+  }
+  .menu button:hover { background: var(--accent-soft); }
+  .menu-sep { height: 1px; background: var(--line); margin: 4px 2px; }
+  .menu-ver { padding: 5px 10px 6px; font-size: 11px; color: var(--muted); }
+
+  .content { flex: 1; overflow-y: auto; padding: 2px 26px 26px; }
+  .view { display: none; flex-direction: column; gap: 12px; }
+  .view.active { display: flex; }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 16px 18px;
+    transition: background .18s, border-color .18s;
+  }
+  .card h2 {
+    font-size: 11.5px; font-weight: 500; color: var(--muted);
+    letter-spacing: .02em; margin-bottom: 12px;
+  }
+  .row { display: flex; align-items: center; gap: 10px; }
+  .row + .row { margin-top: 9px; }
+  .row .lbl { color: var(--muted); font-size: 12.5px; width: 52px; flex: none; }
+
+  select, input[type=text] {
+    flex: 1; min-width: 0;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 10px; font-size: 12.5px;
+    -webkit-appearance: none; appearance: none;
+  }
+  select:hover, input[type=text]:hover { border-color: var(--line-strong); }
+  input[type=text]:focus, select:focus { outline: none; border-color: var(--accent); }
+
+  .btn {
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 8px; padding: 7px 13px; font-size: 12.5px;
+    transition: all .13s; white-space: nowrap; flex: none;
+  }
+  .btn:hover { border-color: var(--line-strong); background: var(--panel-3); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.primary {
+    background: linear-gradient(135deg, var(--accent), var(--red));
+    border-color: transparent; color: #fff; font-weight: 500;
+  }
+  .btn.primary:hover { filter: brightness(1.07); }
+
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+  .stat { background: var(--panel-2); border-radius: 9px; padding: 10px 13px; }
+  .stat .k { color: var(--muted); font-size: 11px; }
+  .stat .v { font-size: 19px; font-weight: 500; font-variant-numeric: tabular-nums; }
+
+  .hero { display: flex; align-items: center; gap: 16px; }
+  .hero .txt { flex: 1; }
+  .hero .big { font-size: 15px; font-weight: 500; }
+  .hero .hint { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  .switch {
+    position: relative; width: 46px; height: 26px; flex: none;
+    border-radius: 999px; background: var(--switch-off);
+    border: 1px solid var(--line); transition: background .16s;
+    cursor: pointer;
+  }
+  .switch::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--knob); transition: transform .16s, background .16s;
+  }
+  .switch.on { background: var(--accent-soft); border-color: var(--accent-line); }
+  .switch.on::after { transform: translateX(20px); background: var(--accent-2); }
+
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 100%; height: 4px;
+    border-radius: 2px; background: var(--track); outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--accent-2); cursor: pointer;
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+  .vol-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+  .vol-head h2 { margin: 0; }
+  .vol-head .val { font-variant-numeric: tabular-nums; color: var(--accent); font-size: 12.5px; font-weight: 500; }
+
+  .log { height: 168px; overflow-y: auto; display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
+  .key {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px; padding: 3px 8px; border-radius: 6px;
+    background: var(--chip-bg); border: 1px solid var(--chip-line);
+    color: var(--chip-text); animation: pop .16s ease-out;
+  }
+  .key.up { background: var(--chip-up-bg); border-color: var(--line); color: var(--muted); }
+  .key.mouse { background: var(--mouse-bg); border-color: var(--mouse-line); color: var(--mouse-text); }
+  @keyframes pop { from { transform: scale(.86); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 10px; width: 100%; height: 100%;
+    color: var(--muted); font-size: 12px;
+  }
+  .empty-mark { width: 92px; height: 92px; color: var(--muted); opacity: .45; }
+
+  .notice {
+    display: none; align-items: center; gap: 10px;
+    background: var(--warn-soft); border: 1px solid var(--warn-line);
+    border-radius: 10px; padding: 10px 14px; font-size: 12.5px; color: var(--warn-text);
+    margin-bottom: 12px;
+  }
+  .notice.show { display: flex; }
+  .notice .btn { margin-left: auto; padding: 4px 11px; font-size: 11.5px; }
+
+  .seg { display: inline-flex; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+  .seg button { padding: 5px 14px; border-radius: 6px; font-size: 12.5px; color: var(--muted); transition: all .13s; }
+  .seg button:hover { color: var(--text); }
+  .seg button.active { background: var(--accent); color: #fff; }
+
+  .note { font-size: 11.5px; color: var(--muted); margin-top: 9px; line-height: 1.65; }
+  .kv { display: flex; justify-content: space-between; padding: 7px 0; font-size: 12.5px; }
+  .kv + .kv { border-top: 1px solid var(--line); }
+  .kv .k { color: var(--muted); }
+
+  /* ---------- 弹窗 ---------- */
+  .overlay {
+    position: fixed; inset: 0; background: var(--overlay);
+    display: none; place-items: center; z-index: 100;
+  }
+  .overlay.show { display: grid; }
+  .modal {
+    width: 380px; background: var(--panel);
+    border: 1px solid var(--line-strong); border-radius: 14px;
+    padding: 22px; box-shadow: 0 20px 50px var(--shadow);
+  }
+  .modal h3 { font-size: 15px; font-weight: 500; margin-bottom: 10px; }
+  .modal p { font-size: 12.5px; color: var(--muted); line-height: 1.7; }
+  .modal .acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+  .ver-line { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 10px 0; }
+  .ver-line .arrow { color: var(--muted); }
+  .ver-line .new { color: var(--accent); font-weight: 500; }
+
+  ::-webkit-scrollbar { width: 9px; }
+  ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-track { background: transparent; }
+</style>
+</head>
+<body>
+<!-- 标记图形：与 assets/speed-mark.svg 同源，内联以便跟随主题着色（currentColor） -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <symbol id="speed-mark" viewBox="0 0 100 100" fill="currentColor" stroke="currentColor">
+    <g fill="none" stroke-linecap="butt" stroke-width="1.9">
+      <path d="M50 6.4 V29.7"/>
+      <path d="M50 70.3 V93.4"/>
+      <path d="M3.5 50 H28"/>
+      <path d="M72 50 H96.5"/>
+    </g>
+    <ellipse cx="50" cy="50" rx="32.9" ry="34.5" fill="none" stroke-width="2.2"/>
+    <g stroke="none">
+      <polygon points="0,-5.56 5.39,-2.67 5.39,2.67 0,5.56 -5.39,2.67 -5.39,-2.67" transform="translate(24.9,24.9)"/>
+      <polygon points="0,-5.56 5.39,-2.67 5.39,2.67 0,5.56 -5.39,2.67 -5.39,-2.67" transform="translate(75.1,24.9)"/>
+      <polygon points="0,-5.56 5.39,-2.67 5.39,2.67 0,5.56 -5.39,2.67 -5.39,-2.67" transform="translate(24.9,75.1)"/>
+      <polygon points="0,-5.56 5.39,-2.67 5.39,2.67 0,5.56 -5.39,2.67 -5.39,-2.67" transform="translate(75.1,75.1)"/>
+    </g>
+    <g stroke="none">
+      <path d="M30 31 H48.8 V39 H38 V46 H30 Z"/>
+      <path d="M51.2 31 H70 V46 H62 V39 H51.2 Z"/>
+      <path d="M30 48.5 H38 V68.5 H30 Z"/>
+      <path d="M62 48.5 H70 V68.5 H51.2 V60.5 H62 Z"/>
+    </g>
+  </symbol>
+</svg>
+<div class="app">
+  <aside class="side">
+    <div class="brand">
+      <svg class="brand-logo" viewBox="0 0 100 100" aria-hidden="true"><use href="#speed-mark"/></svg>
+      <div>
+        <div class="name">KeyTone</div>
+        <div class="tag">打字音效</div>
+      </div>
+    </div>
+    <nav>
+      <button class="nav-item active" data-view="overview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/></svg>
+        概览
+      </button>
+      <button class="nav-item" data-view="profiles">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 15h8"/></svg>
+        音色包
+      </button>
+      <button class="nav-item" data-view="voice">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+        语音播报
+      </button>
+      <button class="nav-item" data-view="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.9.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.4-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
+        设置
+      </button>
+    </nav>
+    <div class="side-foot" id="sideVersion">v0.1.0</div>
+  </aside>
+
+  <main class="main">
+    <header class="top">
+      <div>
+        <h1 id="viewTitle">概览</h1>
+        <div class="sub" id="platformLine">正在连接…</div>
+      </div>
+      <div class="top-right">
+        <button class="pill off" id="toggle"><span class="dot"></span><span id="toggleText">已停用</span></button>
+        <div class="avatar-wrap">
+          <button class="avatar" id="avatarBtn" title="账户">
+            <svg class="avatar-mark" viewBox="0 0 100 100" aria-hidden="true"><use href="#speed-mark"/></svg>
+          </button>
+          <div class="menu" id="avatarMenu">
+            <button data-act="settings">设置</button>
+            <button data-act="theme">切换主题</button>
+            <button data-act="update">检查更新</button>
+            <div class="menu-sep"></div>
+            <div class="menu-ver" id="menuVersion">版本 0.1.0</div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="content">
+      <div class="notice" id="notice">
+        <span id="noticeText">需要「辅助功能」权限才能监听全局输入。</span>
+        <button class="btn" id="grantBtn">去授权</button>
+      </div>
+
+      <!-- 概览 -->
+      <section class="view active" data-view="overview">
+        <div class="card">
+          <div class="hero">
+            <div class="txt">
+              <div class="big" id="heroTitle">按键音已停用</div>
+              <div class="hint" id="heroHint">打开开关后，键盘和鼠标都会有声音</div>
+            </div>
+            <div class="switch" id="heroSwitch"></div>
+          </div>
+        </div>
+
+        <div class="grid3">
+          <div class="stat"><div class="k">输入次数</div><div class="v" id="count">0</div></div>
+          <div class="stat"><div class="k">处理延迟</div><div class="v" id="latency">—</div></div>
+          <div class="stat"><div class="k">采样率</div><div class="v" id="rate">—</div></div>
+        </div>
+
+        <div class="card">
+          <h2>当前音色</h2>
+          <div class="kv"><span class="k">键盘</span><span id="ovKeyboard">—</span></div>
+          <div class="kv"><span class="k">鼠标</span><span id="ovMouse">—</span></div>
+        </div>
+
+        <div class="card">
+          <h2>实时输入</h2>
+          <div class="log" id="log">
+            <div class="empty"><svg class="empty-mark" viewBox="0 0 100 100" aria-hidden="true"><use href="#speed-mark"/></svg><span>按下任意键或点击鼠标开始…</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 音色包 -->
+      <section class="view" data-view="profiles">
+        <div class="card">
+          <h2>键盘音色</h2>
+          <div class="row">
+            <select id="kbSelect"></select>
+            <button class="btn" data-preview="keyboard">试听</button>
+          </div>
+          <div class="note" id="kbMeta">—</div>
+        </div>
+
+        <div class="card">
+          <h2>鼠标音色</h2>
+          <div class="row">
+            <select id="mouseSelect"></select>
+            <button class="btn" data-preview="mouse">试听</button>
+          </div>
+          <div class="note" id="mouseMeta">—</div>
+        </div>
+
+        <div class="card">
+          <h2>音色包目录</h2>
+          <div class="note" style="margin:0 0 10px">
+            每个音色包是一个子目录，里面放 profile.yaml 和音频文件。采用 MechVibes 风格的 YAML 格式，现成的包可以直接导入。
+          </div>
+          <button class="btn" id="openFolderBtn">打开目录</button>
+        </div>
+      </section>
+
+      <!-- 语音播报 -->
+      <section class="view" data-view="voice">
+        <div class="card">
+          <div class="hero">
+            <div class="txt">
+              <div class="big">键位语音播报</div>
+              <div class="hint">按下按键时用系统语音读出键位名称</div>
+            </div>
+            <div class="switch" id="voiceSwitch"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>播报语言</h2>
+          <div class="row">
+            <div class="seg" id="langSeg">
+              <button data-lang="zh">中文（拼音）</button>
+              <button data-lang="en">English</button>
+            </div>
+            <button class="btn" id="sampleBtn" style="margin-left:auto">试读</button>
+          </div>
+          <div class="note" id="voiceNote">
+            中文会把字母按拼音读：A 读「啊」，B 读「波」；鼠标读「左键 / 右键」。
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>说明</h2>
+          <div class="note" style="margin:0">
+            语音只在按下时播报，抬起不重复。打字很快时会打断上一句，保证读的是最新按下的键。<br>
+            本应用窗口在前台时不发声也不播报，避免自己吵到自己。
+          </div>
+        </div>
+      </section>
+
+      <!-- 设置 -->
+      <section class="view" data-view="settings">
+        <div class="card">
+          <h2>外观</h2>
+          <div class="row">
+            <div class="seg" id="themeSeg">
+              <button data-theme="auto">跟随系统</button>
+              <button data-theme="light">浅色</button>
+              <button data-theme="dark">深色</button>
+            </div>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <span class="lbl">菜单栏</span>
+            <div class="seg" id="traySeg">
+              <button data-tray="gold">金色线稿</button>
+              <button data-tray="mono">单色模板</button>
+            </div>
+          </div>
+          <div class="note">两个样式来自同一份 SVG。单色模板只取轮廓，会随菜单栏明暗自动反色；金色线稿颜色固定，深色菜单栏下更醒目。</div>
+        </div>
+
+        <div class="card">
+          <div class="vol-head"><h2>音量</h2><span class="val" id="volVal">80%</span></div>
+          <input type="range" id="volume" min="0" max="100" value="80" />
+          <div class="note">音色包已按峰值归一化，各包音量一致，不会再出现「有的特别小声」。</div>
+        </div>
+
+        <div class="card">
+          <h2>权限</h2>
+          <div class="kv"><span class="k">辅助功能</span><span id="trustState">—</span></div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn" id="grantBtn2">打开系统设置</button>
+          </div>
+          <div class="note">macOS 需要「辅助功能」权限才能监听全局输入。每次重新编译程序后需要重新授权。</div>
+        </div>
+
+        <div class="card">
+          <h2>更新</h2>
+          <div class="row">
+            <span class="lbl">更新源</span>
+            <input type="text" id="repoInput" placeholder="GitHub 仓库，例如 owner/repo" />
+            <button class="btn" id="saveRepoBtn">保存</button>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn primary" id="checkUpdateBtn">检查更新</button>
+          </div>
+          <div class="note">留空表示不检查。填写后从该仓库的 GitHub Releases 读取最新版本。</div>
+        </div>
+
+        <div class="card">
+          <h2>关于</h2>
+          <div class="kv"><span class="k">版本</span><span id="aboutVersion">—</span></div>
+          <div class="kv"><span class="k">平台</span><span id="aboutPlatform">—</span></div>
+          <div class="kv"><span class="k">捕获方式</span><span id="aboutBackend">—</span></div>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+
+<div class="overlay" id="updateOverlay">
+  <div class="modal">
+    <h3 id="updateTitle">检查更新</h3>
+    <div id="updateBody"></div>
+    <div class="acts">
+      <button class="btn" id="updateClose">关闭</button>
+      <button class="btn primary" id="updateDownload" style="display:none">下载</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const TAURI = window.__TAURI__;
+const PREVIEW = !TAURI;
+
+const MOCK = {
+  keyboard: [
+    { name: 'mx-brown', author: 'kbsim', description: 'Cherry MX Brown', device: 'keyboard', active: true, sources: 8, samples: 16 },
+    { name: 'holy-panda', author: 'MechVibes++', description: 'Holy Panda', device: 'keyboard', active: false, sources: 8, samples: 16 },
+  ],
+  mouse: [
+    { name: 'logitech-g502-lightspeed', author: 'MechVibesPlusPlus', description: 'G502', device: 'mouse', active: true, sources: 3, samples: 6 },
+  ],
+};
+
+let state = {
+  enabled: false, voice: true, lang: 'zh', volume: 0.8,
+  theme: 'auto', tray: 'gold', version: '0.1.0', repo: '',
+};
+let count = 0;
+
+const el = (id) => document.getElementById(id);
+
+const invoke = PREVIEW
+  ? async (cmd, args = {}) => {
+      if (cmd === 'get_status') return {
+        platform: 'preview', hook_backend: 'CGEventTap', trusted: true, audio_ready: true,
+        sample_rate: 48000, enabled: state.enabled, volume: state.volume,
+        keyboard: { name: 'mx-brown', sources: 8, samples: 16 },
+        mouse: { name: 'logitech-g502-lightspeed', sources: 3, samples: 6 },
+        voice_enabled: state.voice, voice_lang: state.lang,
+        update_repo: state.repo, theme: state.theme, tray_style: state.tray, version: '0.1.0',
+      };
+      if (cmd === 'list_profiles') return MOCK[args.device] || [];
+      if (cmd === 'set_enabled') return !state.enabled;
+      if (cmd === 'set_volume') return args.volume;
+      if (cmd === 'set_theme') return args.theme;
+      if (cmd === 'set_tray_style') { state.tray = args.style; return args.style; }
+      if (cmd === 'set_voice') {
+        if (args.enabled != null) state.voice = args.enabled;
+        if (args.lang) state.lang = args.lang;
+        return { enabled: state.voice, lang: state.lang };
+      }
+      if (cmd === 'check_update') return { current: '0.1.0', latest: '0.2.0', has_update: true, url: 'https://example.com', error: null };
+      if (cmd === 'select_profile') {
+        MOCK[args.device].forEach(p => p.active = p.name === args.name);
+        return { name: args.name, sources: 3, samples: 6 };
+      }
+      return null;
+    }
+  : TAURI.core.invoke;
+
+const listen = PREVIEW ? () => {} : TAURI.event.listen;
+
+/* ---------- 主题 ---------- */
+const systemDark = window.matchMedia('(prefers-color-scheme: dark)');
+
+function applyTheme(mode, persist) {
+  state.theme = mode;
+  const resolved = mode === 'auto' ? (systemDark.matches ? 'dark' : 'light') : mode;
+  document.documentElement.dataset.theme = resolved;
+  localStorage.setItem('ks-theme', mode);
+  document.querySelectorAll('#themeSeg button').forEach(b => {
+    b.classList.toggle('active', b.dataset.theme === mode);
+  });
+  if (persist) invoke('set_theme', { theme: mode });
+}
+
+systemDark.addEventListener('change', () => {
+  if (state.theme === 'auto') applyTheme('auto', false);
+});
+
+document.querySelectorAll('#themeSeg button').forEach(b => {
+  b.addEventListener('click', () => applyTheme(b.dataset.theme, true));
+});
+
+function setTrayUi(style) {
+  state.tray = style;
+  document.querySelectorAll('#traySeg button').forEach(b => {
+    b.classList.toggle('active', b.dataset.tray === style);
+  });
+}
+
+document.querySelectorAll('#traySeg button').forEach(b => {
+  b.addEventListener('click', async () => {
+    const style = await invoke('set_tray_style', { style: b.dataset.tray });
+    setTrayUi(style);
+  });
+});
+
+/* ---------- 视图切换 ---------- */
+const TITLES = { overview: '概览', profiles: '音色包', voice: '语音播报', settings: '设置' };
+
+function switchView(name) {
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.view === name));
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.dataset.view === name));
+  el('viewTitle').textContent = TITLES[name] || '';
+  el('avatarMenu').classList.remove('show');
+}
+
+document.querySelectorAll('.nav-item').forEach(b => {
+  b.addEventListener('click', () => switchView(b.dataset.view));
+});
+
+/* ---------- 头像菜单 ---------- */
+el('avatarBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  el('avatarMenu').classList.toggle('show');
+});
+document.addEventListener('click', () => el('avatarMenu').classList.remove('show'));
+
+el('avatarMenu').addEventListener('click', (e) => {
+  const act = e.target.dataset.act;
+  if (act === 'settings') switchView('settings');
+  if (act === 'update') { switchView('settings'); runUpdateCheck(); }
+  if (act === 'theme') {
+    // 快捷切换：浅 → 深 → 跟随系统
+    const order = ['light', 'dark', 'auto'];
+    const next = order[(order.indexOf(state.theme) + 1) % order.length];
+    applyTheme(next, true);
+  }
+});
+
+/* ---------- 状态 ---------- */
+function setEnabled(on) {
+  state.enabled = on;
+  el('toggle').classList.toggle('on', on);
+  el('toggle').classList.toggle('off', !on);
+  el('toggleText').textContent = on ? '监听中' : '已停用';
+  el('heroSwitch').classList.toggle('on', on);
+  el('heroTitle').textContent = on ? '按键音已开启' : '按键音已停用';
+  el('heroHint').textContent = on
+    ? '敲键盘、点鼠标都会有声音'
+    : '打开开关后，键盘和鼠标都会有声音';
+}
+
+function showNotice(text) {
+  el('noticeText').textContent = text;
+  el('notice').classList.add('show');
+}
+
+async function toggleEnabled() {
+  try {
+    const next = await invoke('set_enabled', { enabled: !state.enabled });
+    setEnabled(next);
+    if (next) el('notice').classList.remove('show');
+  } catch (e) {
+    const msg = String(e);
+    if (msg.includes('missing-permission')) showNotice('需要「辅助功能」权限才能监听全局输入。');
+    else if (msg.includes('no-profile')) showNotice('没有加载到键盘音色包，先放一个到音色包目录。');
+    else showNotice('启用失败：' + msg);
+    console.error(e);
+  }
+}
+
+el('toggle').addEventListener('click', toggleEnabled);
+el('heroSwitch').addEventListener('click', toggleEnabled);
+
+/* ---------- 音色包 ---------- */
+async function refreshProfiles(device, selectId, metaId) {
+  const list = await invoke('list_profiles', { device });
+  const select = el(selectId);
+  select.innerHTML = '';
+  list.forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.name;
+    opt.textContent = p.name + (p.author ? ` · ${p.author}` : '');
+    opt.selected = p.active;
+    select.appendChild(opt);
+  });
+  if (!list.length) {
+    const opt = document.createElement('option');
+    opt.textContent = '（无可用音色包）';
+    opt.disabled = true;
+    select.appendChild(opt);
+  }
+  const active = list.find(p => p.active);
+  if (metaId) {
+    el(metaId).textContent = active
+      ? `${active.description || '无描述'}　${active.sources} 音源 / ${active.samples} 采样`
+      : '没有可用音色包';
+  }
+  return active;
+}
+
+async function refreshAll() {
+  const [kb, mouse] = await Promise.all([
+    refreshProfiles('keyboard', 'kbSelect', 'kbMeta'),
+    refreshProfiles('mouse', 'mouseSelect', 'mouseMeta'),
+  ]);
+  el('ovKeyboard').textContent = kb ? kb.name : '—';
+  el('ovMouse').textContent = mouse ? mouse.name : '—';
+}
+
+document.querySelectorAll('[data-preview]').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '播放中';
+    try {
+      await invoke('preview', { device: btn.dataset.preview });
+      setTimeout(() => { btn.disabled = false; btn.textContent = label; }, 1500);
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = label;
+      console.error(err);
+    }
+  });
+});
+
+el('kbSelect').addEventListener('change', async (e) => {
+  try {
+    await invoke('select_profile', { device: 'keyboard', name: e.target.value });
+    await refreshAll();
+    await invoke('preview', { device: 'keyboard' });
+  } catch (err) { console.error(err); }
+});
+
+el('mouseSelect').addEventListener('change', async (e) => {
+  try {
+    await invoke('select_profile', { device: 'mouse', name: e.target.value });
+    await refreshAll();
+    await invoke('preview', { device: 'mouse' });
+  } catch (err) { console.error(err); }
+});
+
+el('openFolderBtn').addEventListener('click', () => invoke('open_profiles_folder'));
+
+/* ---------- 语音 ---------- */
+function setVoiceUi(on, lang) {
+  state.voice = on;
+  state.lang = lang;
+  el('voiceSwitch').classList.toggle('on', on);
+  document.querySelectorAll('#langSeg button').forEach(b => {
+    b.classList.toggle('active', b.dataset.lang === lang);
+  });
+  el('voiceNote').textContent = lang === 'zh'
+    ? '中文会把字母按拼音读：A 读「啊」，B 读「波」；鼠标读「左键 / 右键」，方向键读「左箭头 / 右箭头」。'
+    : 'English reads letters and mouse buttons directly: A, B, left, right.';
+}
+
+el('voiceSwitch').addEventListener('click', async () => {
+  const r = await invoke('set_voice', { enabled: !state.voice });
+  setVoiceUi(r.enabled, r.lang);
+  if (r.enabled) invoke('speak_sample', { lang: r.lang });
+});
+
+document.querySelectorAll('#langSeg button').forEach(b => {
+  b.addEventListener('click', async () => {
+    const r = await invoke('set_voice', { lang: b.dataset.lang });
+    setVoiceUi(r.enabled, r.lang);
+    invoke('speak_sample', { lang: r.lang });
+  });
+});
+
+el('sampleBtn').addEventListener('click', () => invoke('speak_sample', { lang: state.lang }));
+
+/* ---------- 音量 ---------- */
+const volume = el('volume');
+let volTimer = null;
+volume.addEventListener('input', () => {
+  el('volVal').textContent = volume.value + '%';
+  clearTimeout(volTimer);
+  volTimer = setTimeout(() => invoke('set_volume', { volume: volume.value / 100 }), 80);
+});
+
+/* ---------- 权限 ---------- */
+const openPerm = () => invoke('open_accessibility_settings');
+el('grantBtn').addEventListener('click', openPerm);
+el('grantBtn2').addEventListener('click', openPerm);
+
+/* ---------- 更新 ---------- */
+function openUpdateModal(title, html, downloadUrl) {
+  el('updateTitle').textContent = title;
+  el('updateBody').innerHTML = html;
+  const btn = el('updateDownload');
+  if (downloadUrl) {
+    btn.style.display = '';
+    btn.onclick = () => invoke('open_url', { url: downloadUrl });
+  } else {
+    btn.style.display = 'none';
+  }
+  el('updateOverlay').classList.add('show');
+}
+
+el('updateClose').addEventListener('click', () => el('updateOverlay').classList.remove('show'));
+el('updateOverlay').addEventListener('click', (e) => {
+  if (e.target === el('updateOverlay')) el('updateOverlay').classList.remove('show');
+});
+
+async function runUpdateCheck() {
+  el('updateOverlay').classList.add('show');
+  el('updateTitle').textContent = '检查更新';
+  el('updateBody').innerHTML = '<p>正在检查…</p>';
+  el('updateDownload').style.display = 'none';
+
+  try {
+    const r = await invoke('check_update');
+    if (r.error) {
+      const hint = r.error === '未配置更新源'
+        ? '还没有配置更新源。在「设置 → 更新」里填入 GitHub 仓库（owner/repo）后再试。'
+        : `检查失败：${r.error}`;
+      openUpdateModal('检查更新', `<p>${hint}</p>`, null);
+      return;
+    }
+    if (r.has_update) {
+      openUpdateModal(
+        '发现新版本',
+        `<div class="ver-line"><span>${r.current}</span><span class="arrow">→</span><span class="new">${r.latest}</span></div>
+         <p>可以下载新版本了。</p>`,
+        r.url
+      );
+    } else {
+      openUpdateModal('已是最新版本', `<p>当前版本 ${r.current}，没有可用的更新。</p>`, null);
+    }
+  } catch (e) {
+    openUpdateModal('检查更新', `<p>检查失败：${e}</p>`, null);
+  }
+}
+
+el('checkUpdateBtn').addEventListener('click', runUpdateCheck);
+
+el('saveRepoBtn').addEventListener('click', async () => {
+  const repo = await invoke('set_update_repo', { repo: el('repoInput').value });
+  el('repoInput').value = repo;
+  state.repo = repo;
+  const btn = el('saveRepoBtn');
+  btn.textContent = '已保存';
+  setTimeout(() => { btn.textContent = '保存'; }, 1200);
+});
+
+/* ---------- 实时输入 ---------- */
+function pushInput(device, name, pressed, latency) {
+  count++;
+  el('count').textContent = count;
+  if (latency != null) el('latency').textContent = latency.toFixed(1) + ' ms';
+
+  const log = el('log');
+  const empty = log.querySelector('.empty');
+  if (empty) empty.remove();
+
+  const chip = document.createElement('span');
+  const isMouse = device === 'mouse';
+  chip.className = 'key' + (isMouse ? ' mouse' : '') + (pressed ? '' : ' up');
+  chip.textContent = isMouse ? name : `${name}${pressed ? '↓' : '↑'}`;
+  log.prepend(chip);
+  while (log.children.length > 60) log.lastChild.remove();
+}
+
+listen('key-event', (e) => {
+  const p = e.payload;
+  pushInput(p.device, p.name, p.pressed, p.latency_ms);
+});
+
+/* ---------- 预览模式假数据 ---------- */
+if (PREVIEW) {
+  const KEYS = ['A', 'S', 'D', 'F', 'J', 'K', 'L', 'Space', 'Enter'];
+  const BTNS = ['left', 'right'];
+  setInterval(() => {
+    if (!state.enabled) return;
+    if (Math.random() < 0.25) {
+      const b = BTNS[Math.floor(Math.random() * BTNS.length)];
+      pushInput('mouse', b, true, 0.9 + Math.random());
+      setTimeout(() => pushInput('mouse', b, false, null), 70);
+    } else {
+      const k = KEYS[Math.floor(Math.random() * KEYS.length)];
+      pushInput('keyboard', k, true, 0.7 + Math.random() * 1.4);
+      setTimeout(() => pushInput('keyboard', k, false, null), 90);
+    }
+  }, 480);
+}
+
+/* ---------- 启动 ---------- */
+(async () => {
+  // 先用本地缓存渲染，避免等接口时闪烁
+  applyTheme(localStorage.getItem('ks-theme') || 'auto', false);
+
+  try {
+    const s = await invoke('get_status');
+
+    el('platformLine').textContent = `${s.platform} · ${s.hook_backend}`;
+    el('rate').textContent = s.sample_rate ? (s.sample_rate / 1000).toFixed(1) + ' kHz' : '—';
+    el('aboutVersion').textContent = 'v' + s.version;
+    el('aboutPlatform').textContent = s.platform;
+    el('aboutBackend').textContent = s.hook_backend;
+    el('menuVersion').textContent = '版本 ' + s.version;
+    el('sideVersion').textContent = 'v' + s.version;
+    el('trustState').textContent = s.trusted ? '已授权' : '未授权';
+    el('trustState').style.color = s.trusted ? 'var(--ok)' : 'var(--accent)';
+
+    state.version = s.version;
+    state.repo = s.update_repo || '';
+    el('repoInput').value = state.repo;
+
+    // 后端保存的主题优先
+    applyTheme(s.theme || 'auto', false);
+    setTrayUi(s.tray_style === 'mono' ? 'mono' : 'gold');
+
+    el('volume').value = Math.round((s.volume ?? 0.8) * 100);
+    el('volVal').textContent = el('volume').value + '%';
+
+    setEnabled(s.enabled);
+    setVoiceUi(s.voice_enabled, s.voice_lang);
+
+    if (!s.trusted) showNotice('需要「辅助功能」权限才能监听全局输入。');
+
+    await refreshAll();
+  } catch (e) {
+    console.error(e);
+  }
+})();
+</script>
+</body>
+</html>

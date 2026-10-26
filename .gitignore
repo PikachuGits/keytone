@@ -1,0 +1,17 @@
+# Rust 构建产物
+target/
+
+# 依赖
+node_modules/
+
+# Tauri 前端构建输出
+dist/assets/
+
+# 系统与编辑器
+.DS_Store
+*.log
+.idea/
+.vscode/
+
+# 本地工具数据
+.workbuddy-ai/

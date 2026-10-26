@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="3.5 6.4 93 87" width="100" height="100"
+     preserveAspectRatio="none"
+     fill="currentColor" stroke="currentColor" role="img" aria-label="速算方法">
+  <title>速算方法 · 状态栏标记</title>
+  <desc>按 速算方法.jpeg（1536×1536）逐像素测量重建：椭圆外环 + 四角六边形节点 + 断开式十字准线 + 中央速符方框。背景透明，纯 currentColor，可直接作 macOS 模板图标。viewBox 已精确收紧到墨迹边界（横 3.5–96.5 / 纵 6.4–93.4），并用 preserveAspectRatio="none" 消除等比缩放留下的半像素边距，使图形真正撑满系统固定的 18pt 画框（形变约 1.3%，肉眼不可辨）。</desc>
+
+  <!-- 十字准线：四段独立短线，在中央字符外围断开（源图 x577–973 / y577–913 留白） -->
+  <g fill="none" stroke-linecap="butt" stroke-width="1.9">
+    <path d="M50 6.4 V29.7"/>
+    <path d="M50 70.3 V93.4"/>
+    <path d="M3.5 50 H28"/>
+    <path d="M72 50 H96.5"/>
+  </g>
+
+  <!-- 外环：源图为椭圆（横 600px / 纵 629px，描边 8px），源图仅 0.89 单位，按 18pt 墨量等重补偿到 2.2 单位 -->
+  <ellipse cx="50" cy="50" rx="32.9" ry="34.5" fill="none" stroke-width="2.2"/>
+
+  <!-- 四角六边形节点：尖顶，半高 5.56 / 半宽 5.39，中心落在 45° 方向 r=35.5 -->
+  <g stroke="none">
+    <polygon points="0,-5.56 5.39,-2.67 5.39,2.67 0,5.56 -5.39,2.67 -5.39,-2.67" transform="translate(24.9,24.9)"/>
+    <polygon points="0,-5.56 5.39,-2.67 5.39,2.67 0,5.56 -5.39,2.67 -5.39,-2.67" transform="translate(75.1,24.9)"/>
+    <polygon points="0,-5.56 5.39,-2.67 5.39,2.67 0,5.56 -5.39,2.67 -5.39,-2.67" transform="translate(24.9,75.1)"/>
+    <polygon points="0,-5.56 5.39,-2.67 5.39,2.67 0,5.56 -5.39,2.67 -5.39,-2.67" transform="translate(75.1,75.1)"/>
+  </g>
+
+  <!-- 中央字符：源图为 4 个互不相连的实心部件，笔画统一 8 单位 -->
+  <g stroke="none">
+    <!-- 上左：横梁 + 左短腿 -->
+    <path d="M30 31 H48.8 V39 H38 V46 H30 Z"/>
+    <!-- 上右：横梁 + 右短腿 -->
+    <path d="M51.2 31 H70 V46 H62 V39 H51.2 Z"/>
+    <!-- 下左：竖条 -->
+    <path d="M30 48.5 H38 V68.5 H30 Z"/>
+    <!-- 下右：右竖条 + 底横梁 -->
+    <path d="M62 48.5 H70 V68.5 H51.2 V60.5 H62 Z"/>
+  </g>
+</svg>

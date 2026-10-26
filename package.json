@@ -1,0 +1,13 @@
+{
+  "name": "keytone",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Keyboard and mouse sound engine built with Tauri 2",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}
