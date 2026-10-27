@@ -288,6 +288,38 @@ git push origin v0.1.0
 推送标签前记得先把 `src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 里的
 `version` 改掉——应用内的版本号来自 `Cargo.toml`。
 
+### 用自签名证书保住辅助功能授权
+
+默认的 ad-hoc 签名有个烦人后果：TCC 把授权绑定在 **cdhash** 上，
+每次重新编译 cdhash 都变，你就得重新去系统设置里勾一遍辅助功能。
+
+解决办法是给本机做一张**自签名代码签名证书**。签完之后 designated requirement 变成：
+
+```
+identifier "com.keytone.app" and certificate root = H"533f0e70..."
+```
+
+绑定的是证书而不是 cdhash，重新编译、重装都不会让授权失效 —— **只需授权一次**。
+
+```sh
+./scripts/make-signing-cert.sh    # 生成并导入证书（只需跑一次）
+./scripts/build-macos.sh          # 之后都用这个脚本打包
+```
+
+`build-macos.sh` 会自动检测证书，找不到就回退到 ad-hoc 并提示。
+
+原理与注意点：
+
+- 证书必须带 `extendedKeyUsage=critical,codeSigning`，否则 `codesign` 不认这个身份
+- 导出 PKCS12 时必须加 `-legacy`。OpenSSL 3 默认用 AES-256，
+  而 macOS 的 `security import` 不认，会报 `MAC verification failed`
+- 导入后还要 `security add-trusted-cert`，否则 `find-identity -p codesigning` 看不到它
+- 这个证书只在本机有效，所以**没有写进 `tauri.conf.json`**（否则别人 clone 下来会打包失败）。
+  本地靠 `APPLE_SIGNING_IDENTITY` 环境变量注入，CI 仍走 ad-hoc。
+  想让 CI 也用同一张证书，把 p12 和密码放进仓库 Secrets
+  （`APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` / `APPLE_SIGNING_IDENTITY`）即可。
+
+
 ### 检查更新
 
 应用内「设置 → 更新」默认指向本仓库的 Releases，
