@@ -58,7 +58,7 @@
 
 ## 快速开始
 
-需要 Rust 1.77+ 和 macOS 13+。
+需要 Rust 1.77+，macOS 13+ 或 Windows 10+。
 
 ```sh
 git clone https://github.com/PikachuGits/keytone.git
@@ -71,6 +71,8 @@ cargo build --release
 ```sh
 ./target/release/keytone --selftest
 ```
+
+Windows 上是 `target\release\keytone.exe --selftest`。
 
 然后启动应用，点右上角开关启用。
 
@@ -254,13 +256,38 @@ src-tauri/src/
 
 ## 平台支持
 
-| 平台 | 状态 |
-|---|---|
-| macOS | ✅ 完整可用，已实机验证 |
-| Windows | ⚠️ 钩子代码已实现，未实机验证 |
-| Linux | ⚠️ evdev 实现已写，未实机验证 |
+| 平台 | 状态 | 说明 |
+|---|---|---|
+| macOS | ✅ 已实机验证 | 键盘 / 鼠标捕获、语音播报全可用 |
+| Windows | ✅ 已实现，CI 编译与单测通过 | 键盘 / 鼠标捕获可用；**语音播报暂不支持** |
+| Linux | ⚠️ 代码已写，未验证 | evdev，需要 `input` 组权限 |
 
-目前音色包里的键名是按 macOS 虚拟键码表整理的，移植到其他平台需要补对应映射。
+### Windows
+
+不需要任何授权 —— 低级键盘钩子（`WH_KEYBOARD_LL`）装好就能用，
+不像 macOS 那样要手动开辅助功能。
+
+- 安装包：Release 里的 `.msi` 或 `-setup.exe`，二选一
+- 数据目录：`%APPDATA%\com.keytone.app\`
+- 键盘钩子和鼠标钩子（`WH_MOUSE_LL`）装在同一个线程，共用消息循环
+- 左右修饰键靠扫描码和扩展位区分，所以 `LeftShift` / `RightShift` 是不同的音色
+
+**语音播报在 Windows 上不可用**。macOS 用的是系统 `AVSpeechSynthesizer`，
+Windows 需要接 SAPI（COM），还没做。界面会直接把语音入口隐藏，
+不会留一个点了没反应的开关。
+
+### 键名映射
+
+音色包里的键名（`a` / `space` / `enter` / `leftshift`）是跨平台统一的，
+但底层虚拟键码各平台完全不同：
+
+| 平台 | 键码来源 |
+|---|---|
+| macOS | Carbon 虚拟键码（`0x00` = A） |
+| Windows | `VK_*` 常量（`0x41` = A） |
+| Linux | evdev 键码（`KEY_A`） |
+
+`src-tauri/src/keymap.rs` 按平台分表，新增平台只需要补一张表。
 
 ---
 
@@ -283,7 +310,14 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-产物是 `KeyTone_<版本>_universal.dmg`，挂在 Release 页面下。
+产物会挂在 Release 页面下：
+
+| 平台 | 文件 |
+|---|---|
+| macOS | `KeyTone_<版本>_universal.dmg`（Apple Silicon + Intel 通用） |
+| Windows | `KeyTone_<版本>_x64_en-US.msi` / `KeyTone_<版本>_x64-setup.exe` |
+
+两个平台并行构建，macOS 那份会先做签名校验再上传。
 
 推送标签前记得先把 `src-tauri/tauri.conf.json` 和 `src-tauri/Cargo.toml` 里的
 `version` 改掉——应用内的版本号来自 `Cargo.toml`。
