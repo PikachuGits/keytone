@@ -1,6 +1,6 @@
 [package]
 name = "keytone"
-version = "0.1.3"
+version = "0.2.0"
 description = "Keyboard and mouse sound engine (Tauri 2)"
 edition = "2021"
 rust-version = "1.77"
@@ -25,6 +25,8 @@ objc2-foundation = "0.3"
 objc2-avf-audio = { version = "0.3", features = ["AVSpeechSynthesis"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
+# 键盘 / 鼠标低级钩子只需要 WindowsAndMessaging（SetWindowsHookExW、GetMessageW、
+# KBDLLHOOKSTRUCT、MSLLHOOKSTRUCT）和 Foundation（LPARAM/LRESULT/WPARAM）。
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_UI_WindowsAndMessaging",

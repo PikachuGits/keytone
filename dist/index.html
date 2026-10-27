@@ -601,6 +601,7 @@ const invoke = PREVIEW
   ? async (cmd, args = {}) => {
       if (cmd === 'get_status') return {
         platform: 'preview', hook_backend: 'CGEventTap', trusted: true, audio_ready: true,
+        voice_available: true,
         sample_rate: 48000, enabled: state.enabled, volume: state.volume,
         keyboard: { name: 'mx-brown', sources: 8, samples: 16 },
         mouse: { name: 'logitech-g502-lightspeed', sources: 3, samples: 6 },
@@ -1006,6 +1007,16 @@ if (PREVIEW) {
 
     setEnabled(s.enabled);
     setVoiceUi(s.voice_enabled, s.voice_lang);
+
+    // 语音播报目前只有 macOS 接了系统 TTS。其他平台直接把入口去掉，
+    // 免得留一个开关点了没反应。
+    if (s.voice_available === false) {
+      document
+        .querySelectorAll('.nav-item[data-view="voice"], .view[data-view="voice"]')
+        .forEach((n) => n.remove());
+      const active = document.querySelector('.view.active');
+      if (active && active.dataset.view === 'voice') switchView('overview');
+    }
 
     if (!s.trusted) showNotice('需要「辅助功能」权限才能监听全局输入。');
 

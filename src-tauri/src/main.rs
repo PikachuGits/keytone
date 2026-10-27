@@ -128,6 +128,8 @@ struct Status {
     mouse: Option<Active>,
     voice_enabled: bool,
     voice_lang: &'static str,
+    /// 当前平台是否提供语音播报。Windows / Linux 尚未实现，界面据此隐藏入口。
+    voice_available: bool,
     update_repo: String,
     theme: String,
     tray_style: String,
@@ -172,6 +174,7 @@ fn get_status(state: State<'_, AppState>) -> Status {
         mouse: state.active_mouse.lock().unwrap().clone(),
         voice_enabled: state.voice_enabled.load(Ordering::Relaxed),
         voice_lang: state.voice_lang.lock().unwrap().as_str(),
+        voice_available: speech::available(),
         update_repo: state.update_repo.lock().unwrap().clone(),
         theme: state.theme.lock().unwrap().clone(),
         tray_style: state.tray_style.lock().unwrap().clone(),
@@ -254,6 +257,9 @@ fn set_voice(
 /// 试读：播一段示例，让用户确认语音效果和语言。
 #[tauri::command]
 fn speak_sample(app: tauri::AppHandle, lang: String) {
+    if !speech::available() {
+        return;
+    }
     let lang = Lang::parse(&lang).unwrap_or(Lang::Zh);
     let text = match lang {
         Lang::Zh => "啊，波，次，左键，右键",
@@ -826,9 +832,16 @@ fn main() {
             .unwrap_or(Lang::Zh);
         let text = args.get(pos + 2).cloned().unwrap_or_else(|| "测试".into());
 
+        if !speech::available() {
+            eprintln!("当前平台未实现语音播报");
+            std::process::exit(1);
+        }
+
         speech::speak(&text, lang, 1.0);
+
         // 给 TTS 一点时间把音频吐出来。CFRunLoop 是 AVSpeechSynthesizer
-        // 需要的运行环境，这里模拟一下主线程。
+        // 需要的运行环境，这里模拟一下主线程。只有 macOS 有这套。
+        #[cfg(target_os = "macos")]
         unsafe {
             core_foundation::runloop::CFRunLoop::run_in_mode(
                 core_foundation::runloop::kCFRunLoopDefaultMode,
@@ -836,6 +849,7 @@ fn main() {
                 false,
             );
         }
+
         println!("spoke: [{:?}] {text}", lang);
         return;
     }

@@ -9,7 +9,8 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crossbeam_channel::Sender;
-use evdev::{Device, EventType, Key};
+// evdev 也有个 Device，和本模块的 Device 重名，必须改别名。
+use evdev::{Device as EvdevDevice, EventType, Key};
 
 use super::{Device, InputEvent};
 
@@ -48,7 +49,7 @@ pub fn start(tx: Sender<InputEvent>) -> Result<(), String> {
 
         found += 1;
         let tx = tx.clone();
-        let mut device: Device = device;
+        let mut device: EvdevDevice = device;
 
         std::thread::Builder::new()
             .name("kbs-evdev".into())
@@ -67,7 +68,8 @@ pub fn start(tx: Sender<InputEvent>) -> Result<(), String> {
                             }
                             let _ = tx.try_send(InputEvent {
                                 device: Device::Keyboard,
-                                code,
+                                // evdev 的键码是 u16，InputEvent 统一用 u32。
+                                code: code as u32,
                                 name: key_name(code),
                                 pressed,
                                 timestamp_ns: now_ns(),

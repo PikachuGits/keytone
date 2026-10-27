@@ -10,9 +10,17 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: 单元测试与构建
-    runs-on: macos-latest
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+          - name: Windows
+            os: windows-latest
 
     steps:
       - name: 检出代码
