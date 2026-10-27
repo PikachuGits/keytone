@@ -621,13 +621,17 @@ fn show_main_window(app: &tauri::AppHandle) {
         return;
     }
 
-    if let Err(e) = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+    let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("KeyTone")
         .inner_size(900.0, 660.0)
-        .min_inner_size(780.0, 580.0)
-        .title_bar_style(tauri::TitleBarStyle::Overlay)
-        .build()
-    {
+        .min_inner_size(780.0, 580.0);
+
+    // Overlay 标题栏是 macOS 专有的（把红绿灯叠在内容上）。
+    // 其他平台没有这个方法，直接调用会编译不过。
+    #[cfg(target_os = "macos")]
+    let builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay);
+
+    if let Err(e) = builder.build() {
         eprintln!("[window] 重建主窗口失败: {e}");
     }
 }
