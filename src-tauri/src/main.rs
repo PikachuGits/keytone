@@ -603,9 +603,18 @@ fn install_update(app: tauri::AppHandle, path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// 本机是否装了指定名字的代码签名证书。
 #[cfg(target_os = "macos")]
-fn install_macos(dmg: &std::path::Path) -> Result<(), String> {
-    // 从当前可执行文件反推 .app 路径，这样开发时从 target 里跑也能正确替换。
+fn identity_available(name: &str) -> bool {
+    std::process::Command::new("security")
+        .args(["find-identity", "-v", "-p", "codesigning"])
+        .output()
+        .map(|out| String::from_utf8_lossy(&out.stdout).contains(name))
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "macos")]
+fn install_macos(dmg: &std::path::Path) -> Result<(), String> {    // 从当前可执行文件反推 .app 路径，这样开发时从 target 里跑也能正确替换。
     let exe = std::env::current_exe().map_err(|e| format!("无法定位当前程序: {e}"))?;
     let bundle = exe
         .parent()
@@ -652,6 +661,25 @@ fn install_macos(dmg: &std::path::Path) -> Result<(), String> {
         return Err("从安装包里提取应用失败".into());
     }
 
+    // CI 产出的包是 ad-hoc 签名，它的 designated requirement 绑在 cdhash 上，
+    // 装上去之后辅助功能授权就失效了，而且每次更新都会失效一次。
+    // 本机如果有自签名证书，就用同一张证书重签，requirement 继续绑证书，
+    // 授权只需要勾一次，以后更新都不会掉。
+    let identity = "KeyTone Local Signing";
+    if identity_available(identity) {
+        let resigned = std::process::Command::new("codesign")
+            .args(["--force", "--deep", "--sign", identity, "--options", "runtime"])
+            .arg(&staged)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !resigned {
+            eprintln!("[update] 用本地证书重签失败，安装后可能需要重新授权辅助功能");
+        }
+    } else {
+        eprintln!("[update] 本机没有签名证书，装上去的是 ad-hoc 包，辅助功能需要重新授权");
+    }
+
     let script = std::env::temp_dir().join("keytone-apply-update.sh");
     let body = format!(
         "#!/bin/sh\n\
@@ -661,9 +689,17 @@ fn install_macos(dmg: &std::path::Path) -> Result<(), String> {
          ditto '{src}' '{target}'\n\
          xattr -dr com.apple.quarantine '{target}' 2>/dev/null\n\
          open '{target}'\n\
+         # 清理暂存目录和安装包：不清理的话临时目录里会留一份完整的应用副本，\n\
+         # 既占空间，也可能被 Spotlight 之类当成第二个应用索引到。\n\
+         rm -rf '{stage}'\n\
+         rmdir '{mount}' 2>/dev/null\n\
+         rm -f '{dmg}'\n\
          rm -f \"$0\"\n",
         target = bundle.display(),
         src = staged.display(),
+        stage = stage_dir.display(),
+        mount = mount.display(),
+        dmg = dmg.display(),
     );
     std::fs::write(&script, body).map_err(|e| format!("写入更新脚本失败: {e}"))?;
 
