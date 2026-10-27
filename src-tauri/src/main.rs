@@ -157,6 +157,9 @@ struct UpdateInfo {
     latest: Option<String>,
     has_update: bool,
     url: Option<String>,
+    /// 当前平台对应安装包的下载地址（dmg / exe / msi）
+    asset_url: Option<String>,
+    asset_name: Option<String>,
     error: Option<String>,
 }
 
@@ -345,6 +348,8 @@ fn check_update(state: State<'_, AppState>) -> UpdateInfo {
             latest: None,
             has_update: false,
             url: None,
+            asset_url: None,
+            asset_name: None,
             error: Some("未配置更新源".into()),
         };
     }
@@ -363,6 +368,8 @@ fn check_update(state: State<'_, AppState>) -> UpdateInfo {
                 latest: None,
                 has_update: false,
                 url: None,
+                asset_url: None,
+                asset_name: None,
                 error: Some("网络请求失败".into()),
             }
         }
@@ -376,6 +383,8 @@ fn check_update(state: State<'_, AppState>) -> UpdateInfo {
                 latest: None,
                 has_update: false,
                 url: None,
+                asset_url: None,
+                asset_name: None,
                 error: Some("返回内容无法解析".into()),
             }
         }
@@ -396,6 +405,8 @@ fn check_update(state: State<'_, AppState>) -> UpdateInfo {
             latest: None,
             has_update: false,
             url: None,
+            asset_url: None,
+            asset_name: None,
             error: Some(msg.to_string()),
         };
     };
@@ -405,13 +416,49 @@ fn check_update(state: State<'_, AppState>) -> UpdateInfo {
         .and_then(|v| v.as_str())
         .map(str::to_string);
 
+    let (asset_url, asset_name) = pick_asset(&json);
+
     UpdateInfo {
         current: APP_VERSION,
         has_update: version_is_newer(&tag, APP_VERSION),
         latest: Some(tag),
         url,
+        asset_url,
+        asset_name,
         error: None,
     }
+}
+
+/// 从 release 的 assets 里挑当前平台能装的包。
+///
+/// 一个 release 会挂多个平台的产物，这里按后缀挑：macOS 认 `.dmg`，
+/// Windows 优先 `-setup.exe`（NSIS）再退 `.msi`，Linux 认 AppImage / deb。
+fn pick_asset(json: &serde_json::Value) -> (Option<String>, Option<String>) {
+    let Some(assets) = json.get("assets").and_then(|v| v.as_array()) else {
+        return (None, None);
+    };
+
+    let suffixes: &[&str] = if cfg!(target_os = "macos") {
+        &[".dmg"]
+    } else if cfg!(target_os = "windows") {
+        &["-setup.exe", ".msi"]
+    } else {
+        &[".AppImage", ".deb"]
+    };
+
+    for suffix in suffixes {
+        for asset in assets {
+            let name = asset.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            if !name.ends_with(suffix) {
+                continue;
+            }
+            if let Some(url) = asset.get("browser_download_url").and_then(|v| v.as_str()) {
+                return (Some(url.to_string()), Some(name.to_string()));
+            }
+        }
+    }
+
+    (None, None)
 }
 
 fn version_is_newer(latest: &str, current: &str) -> bool {
@@ -439,12 +486,212 @@ fn version_is_newer(latest: &str, current: &str) -> bool {
     false
 }
 
+/// 下载安装包到数据目录的 `updates/` 下，边下边把进度推给前端。
+/// 已存在同名文件直接复用，避免重复下载。
+#[tauri::command]
+async fn download_update(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    url: String,
+    name: String,
+) -> Result<String, String> {
+    if !url.starts_with("https://") {
+        return Err("下载地址必须是 https".into());
+    }
+    // 文件名只放行安全字符，防止 ../ 穿越到目录外。
+    if name.is_empty() || name.contains('/') || name.contains('\\') || name.contains("..") {
+        return Err("安装包文件名非法".into());
+    }
+
+    let dir = state.data_dir.join("updates");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建下载目录失败: {e}"))?;
+    let dest = dir.join(&name);
+
+    // 上次下到一半就关了的话文件是不完整的，这里只认非空文件，
+    // 但下载失败时会主动删掉，所以正常情况不会残留半截包。
+    if dest.is_file() && std::fs::metadata(&dest).map(|m| m.len() > 0).unwrap_or(false) {
+        return Ok(dest.to_string_lossy().to_string());
+    }
+
+    let total = remote_size(&url).unwrap_or(0);
+    let dest_task = dest.clone();
+    let app_task = app.clone();
+
+    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        let mut child = std::process::Command::new("curl")
+            .args(["-sL", "--fail", "--max-time", "600", "-H", "User-Agent: keytone", "-o"])
+            .arg(&dest_task)
+            .arg(&url)
+            .spawn()
+            .map_err(|e| format!("无法启动下载: {e}"))?;
+
+        // curl 不会把进度写进 stdout，只能盯着文件大小轮询。
+        loop {
+            if let Ok(Some(status)) = child.try_wait() {
+                if !status.success() {
+                    let _ = std::fs::remove_file(&dest_task);
+                    return Err("下载失败，请检查网络后重试".into());
+                }
+                break;
+            }
+
+            let downloaded = std::fs::metadata(&dest_task).map(|m| m.len()).unwrap_or(0);
+            let _ = app_task.emit(
+                "update-progress",
+                serde_json::json!({ "downloaded": downloaded, "total": total }),
+            );
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+
+        let size = std::fs::metadata(&dest_task).map(|m| m.len()).unwrap_or(0);
+        let _ = app_task.emit(
+            "update-progress",
+            serde_json::json!({ "downloaded": size, "total": size, "done": true }),
+        );
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("下载任务异常: {e}"))??;
+
+    Ok(dest.to_string_lossy().to_string())
+}
+
+/// 取远端文件大小，用来算下载百分比。拿不到就返回 None，界面显示已下载字节数。
+fn remote_size(url: &str) -> Option<u64> {
+    let out = std::process::Command::new("curl")
+        .args(["-sIL", "--max-time", "8", "-H", "User-Agent: keytone", url])
+        .output()
+        .ok()?;
+
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|line| {
+            let lower = line.to_ascii_lowercase();
+            lower
+                .strip_prefix("content-length:")
+                .and_then(|v| v.trim().parse::<u64>().ok())
+        })
+        .last()
+}
+
+/// 安装已下载好的包，然后退出当前进程。
+///
+/// macOS 是「自己替换自己」：不能在自己还跑着的时候删掉自己的包，
+/// 所以复制好新包之后写一个延迟脚本，退出进程由脚本完成替换并重新拉起。
+#[tauri::command]
+fn install_update(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let file = std::path::PathBuf::from(&path);
+    if !file.is_file() {
+        return Err("安装包不存在，请重新下载".into());
+    }
+
+    #[cfg(target_os = "macos")]
+    install_macos(&file)?;
+
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new(&file)
+            .spawn()
+            .map_err(|e| format!("无法启动安装程序: {e}"))?;
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    return Err("当前平台不支持自动安装，请手动下载".into());
+
+    app.exit(0);
+    #[allow(unreachable_code)]
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn install_macos(dmg: &std::path::Path) -> Result<(), String> {
+    // 从当前可执行文件反推 .app 路径，这样开发时从 target 里跑也能正确替换。
+    let exe = std::env::current_exe().map_err(|e| format!("无法定位当前程序: {e}"))?;
+    let bundle = exe
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+        .filter(|p| p.extension().is_some_and(|e| e == "app"))
+        .ok_or("当前不是以 .app 方式运行，无法自动替换")?;
+
+    let mount = std::env::temp_dir().join("keytone-update-mnt");
+    let _ = std::fs::remove_dir_all(&mount);
+    std::fs::create_dir_all(&mount).map_err(|e| format!("创建挂载点失败: {e}"))?;
+
+    let ok = std::process::Command::new("hdiutil")
+        .args(["attach", "-nobrowse", "-readonly", "-mountpoint"])
+        .arg(&mount)
+        .arg(dmg)
+        .status()
+        .map_err(|e| format!("挂载安装包失败: {e}"))?
+        .success();
+    if !ok {
+        let _ = std::fs::remove_dir_all(&mount);
+        return Err("挂载安装包失败".into());
+    }
+
+    let src = mount.join("KeyTone.app");
+    let stage_dir = std::env::temp_dir().join("keytone-update-stage");
+    let _ = std::fs::remove_dir_all(&stage_dir);
+    std::fs::create_dir_all(&stage_dir).map_err(|e| format!("创建暂存目录失败: {e}"))?;
+    let staged = stage_dir.join("KeyTone.app");
+
+    let copied = std::process::Command::new("ditto")
+        .arg(&src)
+        .arg(&staged)
+        .status()
+        .map_err(|e| format!("复制新版本失败: {e}"))?
+        .success();
+
+    let _ = std::process::Command::new("hdiutil")
+        .arg("detach")
+        .arg(&mount)
+        .status();
+
+    if !copied || !staged.is_dir() {
+        return Err("从安装包里提取应用失败".into());
+    }
+
+    let script = std::env::temp_dir().join("keytone-apply-update.sh");
+    let body = format!(
+        "#!/bin/sh\n\
+         # 等当前进程彻底退出，再替换包，否则会被占用。\n\
+         sleep 2\n\
+         rm -rf '{target}'\n\
+         ditto '{src}' '{target}'\n\
+         xattr -dr com.apple.quarantine '{target}' 2>/dev/null\n\
+         open '{target}'\n\
+         rm -f \"$0\"\n",
+        target = bundle.display(),
+        src = staged.display(),
+    );
+    std::fs::write(&script, body).map_err(|e| format!("写入更新脚本失败: {e}"))?;
+
+    std::process::Command::new("/bin/sh")
+        .arg(&script)
+        .spawn()
+        .map_err(|e| format!("启动更新脚本失败: {e}"))?;
+
+    Ok(())
+}
+
 #[tauri::command]
 fn open_url(url: String) {
     // 只放行 http(s)，避免被当成任意命令执行
-    if url.starts_with("https://") || url.starts_with("http://") {
-        let _ = std::process::Command::new("open").arg(url).spawn();
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return;
     }
+
+    #[cfg(target_os = "macos")]
+    let _ = std::process::Command::new("open").arg(&url).spawn();
+
+    #[cfg(target_os = "windows")]
+    let _ = std::process::Command::new("cmd")
+        .args(["/C", "start", "", &url])
+        .spawn();
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
 }
 
 #[tauri::command]
@@ -497,7 +744,19 @@ fn play_preview(audio: &AudioHandle, device: Device) {
 }
 
 /// 启用 / 停用的唯一入口，界面和托盘菜单都走这里，保证状态一致。
+///
+/// 成功之后必须广播 `enabled-changed`：托盘菜单能改状态，界面也能改，
+/// 不广播的话从托盘切完，窗口里的开关还停在旧值，两边就对不上了。
 fn apply_enabled(app: &tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    let result = apply_enabled_inner(app, enabled);
+    if let Ok(current) = result {
+        let _ = app.emit("enabled-changed", serde_json::json!({ "enabled": current }));
+        return Ok(current);
+    }
+    result
+}
+
+fn apply_enabled_inner(app: &tauri::AppHandle, enabled: bool) -> Result<bool, String> {
     let state = app.state::<AppState>();
 
     if !enabled {
@@ -1039,6 +1298,8 @@ fn main() {
             set_tray_style,
             set_update_repo,
             check_update,
+            download_update,
+            install_update,
             open_url,
             open_accessibility_settings,
             open_profiles_folder,

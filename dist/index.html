@@ -318,6 +318,12 @@
   .ver-line { display: flex; align-items: center; gap: 8px; font-size: 13px; margin: 10px 0; }
   .ver-line .arrow { color: var(--muted); }
   .ver-line .new { color: var(--accent); font-weight: 500; }
+  .modal .hint { font-size: 11.5px; color: var(--muted); opacity: .8; margin-top: 8px; }
+  .bar-track { height: 6px; border-radius: 3px; background: var(--hover); overflow: hidden; margin-top: 12px; }
+  .bar-fill {
+    height: 100%; width: 0; border-radius: 3px;
+    background: var(--accent); transition: width .15s linear;
+  }
 
   ::-webkit-scrollbar { width: 9px; }
   ::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
@@ -618,7 +624,15 @@ const invoke = PREVIEW
         if (args.lang) state.lang = args.lang;
         return { enabled: state.voice, lang: state.lang };
       }
-      if (cmd === 'check_update') return { current: '0.1.0', latest: '0.2.0', has_update: true, url: 'https://example.com', error: null };
+      if (cmd === 'check_update') return {
+        current: '0.1.0', latest: '0.2.0', has_update: true,
+        url: 'https://example.com',
+        asset_url: 'https://example.com/KeyTone_0.2.0_universal.dmg',
+        asset_name: 'KeyTone_0.2.0_universal.dmg',
+        error: null,
+      };
+      if (cmd === 'download_update') return '/tmp/KeyTone_0.2.0_universal.dmg';
+      if (cmd === 'install_update') return null;
       if (cmd === 'select_profile') {
         MOCK[args.device].forEach(p => p.active = p.name === args.name);
         return { name: args.name, sources: 3, samples: 6 };
@@ -876,53 +890,187 @@ el('grantBtn').addEventListener('click', openPerm);
 el('grantBtn2').addEventListener('click', openPerm);
 
 /* ---------- 更新 ---------- */
-function openUpdateModal(title, html, downloadUrl) {
+let updateState = { info: null, file: null };
+
+const closeUpdateModal = () => el('updateOverlay').classList.remove('show');
+
+function setUpdateButtons(secondary, primary) {
+  const s = el('updateClose');
+  const p = el('updateDownload');
+
+  if (secondary) {
+    s.style.display = '';
+    s.textContent = secondary.label;
+    s.onclick = secondary.onClick;
+  } else {
+    s.style.display = 'none';
+    s.onclick = null;
+  }
+
+  if (primary) {
+    p.style.display = '';
+    p.textContent = primary.label;
+    p.onclick = primary.onClick;
+  } else {
+    p.style.display = 'none';
+    p.onclick = null;
+  }
+}
+
+function openUpdateModal(title, html, buttons = {}) {
   el('updateTitle').textContent = title;
   el('updateBody').innerHTML = html;
-  const btn = el('updateDownload');
-  if (downloadUrl) {
-    btn.style.display = '';
-    btn.onclick = () => invoke('open_url', { url: downloadUrl });
-  } else {
-    btn.style.display = 'none';
-  }
+  setUpdateButtons(buttons.secondary, buttons.primary);
   el('updateOverlay').classList.add('show');
 }
 
-el('updateClose').addEventListener('click', () => el('updateOverlay').classList.remove('show'));
 el('updateOverlay').addEventListener('click', (e) => {
-  if (e.target === el('updateOverlay')) el('updateOverlay').classList.remove('show');
+  if (e.target === el('updateOverlay')) closeUpdateModal();
 });
 
+const fmtMB = (n) => (n / 1024 / 1024).toFixed(1) + ' MB';
+
 async function runUpdateCheck() {
-  el('updateOverlay').classList.add('show');
-  el('updateTitle').textContent = '检查更新';
-  el('updateBody').innerHTML = '<p>正在检查…</p>';
-  el('updateDownload').style.display = 'none';
+  openUpdateModal('检查更新', '<p>正在检查…</p>', {
+    secondary: { label: '关闭', onClick: closeUpdateModal },
+  });
+
+  let r;
+  try {
+    r = await invoke('check_update');
+  } catch (e) {
+    openUpdateModal('检查更新', `<p>检查失败：${e}</p>`, {
+      secondary: { label: '关闭', onClick: closeUpdateModal },
+    });
+    return;
+  }
+
+  if (r.error) {
+    const hint = r.error === '未配置更新源'
+      ? '还没有配置更新源。在下方「更新源」里填入 GitHub 仓库（owner/repo）后再试。'
+      : `检查失败：${r.error}`;
+    openUpdateModal('检查更新', `<p>${hint}</p>`, {
+      secondary: { label: '关闭', onClick: closeUpdateModal },
+    });
+    return;
+  }
+
+  updateState.info = r;
+
+  if (!r.has_update) {
+    openUpdateModal(
+      '已是最新版本',
+      `<p>当前版本 ${r.current}，没有可用的更新。</p>`,
+      { secondary: { label: '关闭', onClick: closeUpdateModal } }
+    );
+    return;
+  }
+
+  // 有新版：先问要不要下载，不直接甩下载链接。
+  const versionLine = `<div class="ver-line"><span>${r.current}</span><span class="arrow">→</span><span class="new">${r.latest}</span></div>`;
+
+  if (!r.asset_url) {
+    openUpdateModal(
+      '发现新版本',
+      `${versionLine}<p>这个版本没有提供当前平台的安装包，只能到发布页手动下载。</p>`,
+      {
+        secondary: { label: '关闭', onClick: closeUpdateModal },
+        primary: {
+          label: '打开发布页',
+          onClick: () => { invoke('open_url', { url: r.url }); closeUpdateModal(); },
+        },
+      }
+    );
+    return;
+  }
+
+  openUpdateModal(
+    '发现新版本',
+    `${versionLine}<p>是否现在下载？下载完成后可以选择立即更新并重启，或稍后再说。</p>`,
+    {
+      secondary: { label: '稍后', onClick: closeUpdateModal },
+      primary: { label: '下载', onClick: () => downloadUpdate(r) },
+    }
+  );
+}
+
+async function downloadUpdate(r) {
+  openUpdateModal(
+    '正在下载',
+    `<p id="updateProgressText">准备中…</p>
+     <div class="bar-track"><div class="bar-fill" id="updateBar"></div></div>`,
+    { secondary: { label: '取消', onClick: closeUpdateModal } }
+  );
 
   try {
-    const r = await invoke('check_update');
-    if (r.error) {
-      const hint = r.error === '未配置更新源'
-        ? '还没有配置更新源。在「设置 → 更新」里填入 GitHub 仓库（owner/repo）后再试。'
-        : `检查失败：${r.error}`;
-      openUpdateModal('检查更新', `<p>${hint}</p>`, null);
-      return;
-    }
-    if (r.has_update) {
-      openUpdateModal(
-        '发现新版本',
-        `<div class="ver-line"><span>${r.current}</span><span class="arrow">→</span><span class="new">${r.latest}</span></div>
-         <p>可以下载新版本了。</p>`,
-        r.url
-      );
-    } else {
-      openUpdateModal('已是最新版本', `<p>当前版本 ${r.current}，没有可用的更新。</p>`, null);
-    }
+    const file = await invoke('download_update', {
+      url: r.asset_url,
+      name: r.asset_name,
+    });
+    updateState.file = file;
+
+    openUpdateModal(
+      '下载完成',
+      `<div class="ver-line"><span>${r.current}</span><span class="arrow">→</span><span class="new">${r.latest}</span></div>
+       <p>安装包已下载完成。更新会关闭应用，替换完成后自动重新打开。</p>
+       <p class="hint">macOS 首次打开新版本时，辅助功能授权可能需要重新勾选一次。</p>`,
+      {
+        secondary: { label: '稍后更新', onClick: closeUpdateModal },
+        primary: { label: '更新并重启', onClick: applyUpdate },
+      }
+    );
   } catch (e) {
-    openUpdateModal('检查更新', `<p>检查失败：${e}</p>`, null);
+    openUpdateModal(
+      '下载失败',
+      `<p>${e}</p>`,
+      {
+        secondary: { label: '关闭', onClick: closeUpdateModal },
+        primary: { label: '重试', onClick: () => downloadUpdate(r) },
+      }
+    );
   }
 }
+
+async function applyUpdate() {
+  if (!updateState.file) return;
+
+  openUpdateModal('正在更新', '<p>应用即将退出，替换完成后会自动重新打开…</p>', {});
+
+  try {
+    await invoke('install_update', { path: updateState.file });
+  } catch (e) {
+    openUpdateModal(
+      '更新失败',
+      `<p>${e}</p><p>可以到发布页手动下载安装包。</p>`,
+      {
+        secondary: { label: '关闭', onClick: closeUpdateModal },
+        primary: {
+          label: '打开发布页',
+          onClick: () => invoke('open_url', { url: updateState.info?.url }),
+        },
+      }
+    );
+  }
+}
+
+listen('update-progress', (e) => {
+  const bar = el('updateBar');
+  if (!bar) return;
+
+  const { downloaded = 0, total = 0 } = e.payload || {};
+  const text = el('updateProgressText');
+
+  if (total > 0) {
+    const pct = Math.min(100, Math.round((downloaded / total) * 100));
+    bar.style.width = pct + '%';
+    if (text) text.textContent = `${pct}%（${fmtMB(downloaded)} / ${fmtMB(total)}）`;
+  } else {
+    // 拿不到远端大小时只报已下载量，进度条给个不确定态。
+    bar.style.width = '100%';
+    bar.style.opacity = '.35';
+    if (text) text.textContent = `已下载 ${fmtMB(downloaded)}`;
+  }
+});
 
 el('checkUpdateBtn').addEventListener('click', runUpdateCheck);
 
@@ -956,6 +1104,13 @@ function pushInput(device, name, pressed, latency) {
 listen('key-event', (e) => {
   const p = e.payload;
   pushInput(p.device, p.name, p.pressed, p.latency_ms);
+});
+
+// 托盘菜单也能切启用状态，后端改完会广播，界面跟着更新，
+// 否则从菜单栏切完，窗口里的开关还停在旧值。
+listen('enabled-changed', (e) => {
+  const on = e.payload?.enabled;
+  if (typeof on === 'boolean') setEnabled(on);
 });
 
 /* ---------- 预览模式假数据 ---------- */
@@ -1018,7 +1173,9 @@ if (PREVIEW) {
       if (active && active.dataset.view === 'voice') switchView('overview');
     }
 
-    if (!s.trusted) showNotice('需要「辅助功能」权限才能监听全局输入。');
+    // 权限提示只在用户真的去点开关时才弹（走 toggleEnabled 的错误分支）。
+    // 页面加载时不要弹 —— 窗口关到托盘后每次重开都会重建页面，
+    // 那样每次打开都蹦一条提示，很烦。
 
     await refreshAll();
   } catch (e) {
