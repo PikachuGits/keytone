@@ -5,6 +5,7 @@ mod bundled;
 mod config;
 mod hook;
 mod keymap;
+mod muyu;
 mod profile;
 mod speech;
 mod synth;
@@ -50,6 +51,9 @@ pub struct AppState {
     theme: Mutex<String>,
     tray_style: Mutex<String>,
     tray_toggle: Mutex<Option<CheckMenuItem<Wry>>>,
+    /// 木鱼：库存、节拍、功德
+    muyu: Arc<muyu::Muyu>,
+    muyu_toggle: Mutex<Option<CheckMenuItem<Wry>>>,
 }
 
 impl AppState {
@@ -104,6 +108,14 @@ impl AppState {
             update_repo: self.update_repo.lock().unwrap().clone(),
             theme: self.theme.lock().unwrap().clone(),
             tray_style: self.tray_style.lock().unwrap().clone(),
+            muyu_enabled: self.muyu.enabled(),
+            muyu_sound: self.muyu.sound(),
+            muyu_volume: self.muyu.volume(),
+            muyu_interval_ms: self.muyu.interval_ms(),
+            muyu_window: self.muyu.window_visible(),
+            muyu_scale: self.muyu.scale(),
+            muyu_x: self.muyu.pos().map(|p| p.0),
+            muyu_y: self.muyu.pos().map(|p| p.1),
         };
         config::save(&self.data_dir, &settings);
     }
@@ -113,7 +125,14 @@ impl AppState {
             let _ = item.set_checked(enabled);
         }
     }
+
+    fn sync_muyu_tray(&self, enabled: bool) {
+        if let Some(item) = self.muyu_toggle.lock().unwrap().as_ref() {
+            let _ = item.set_checked(enabled);
+        }
+    }
 }
+
 
 #[derive(Serialize)]
 struct Status {
@@ -813,82 +832,7 @@ fn apply_enabled_inner(app: &tauri::AppHandle, enabled: bool) -> Result<bool, St
         return Err("missing-permission".into());
     }
 
-    if !state.hook_started.swap(true, Ordering::SeqCst) {
-        let (tx, rx) = crossbeam_channel::unbounded::<hook::InputEvent>();
-
-        hook::start(tx).map_err(|e| {
-            state.hook_started.store(false, Ordering::SeqCst);
-            e
-        })?;
-
-        // 消费线程：播放音频 + 语音播报 + 把事件推给前端。
-        // 播放必须离开钩子回调线程，否则系统会因为回调超时把 tap 禁用。
-        let app_handle = app.clone();
-        std::thread::Builder::new()
-            .name("kbs-consumer".into())
-            .spawn(move || {
-                let state = app_handle.state::<AppState>();
-                let mut down: Vec<(Device, u32)> = Vec::new();
-
-                for ev in rx {
-                    // 长按会被系统连发，重复的按下事件直接丢弃。
-                    let id = (ev.device, ev.code);
-                    if ev.pressed {
-                        if down.contains(&id) {
-                            continue;
-                        }
-                        down.push(id);
-                    } else {
-                        down.retain(|c| *c != id);
-                    }
-
-                    if !state.enabled.load(Ordering::Relaxed) {
-                        continue;
-                    }
-
-                    let latency_ms = now_ns().saturating_sub(ev.timestamp_ns) as f64 / 1_000_000.0;
-
-                    // 本应用在前台时不发声：用户点自己的界面、在自己的窗口里打字，
-                    // 不该被自己的音效吵到。事件照常推给前端，日志还能看。
-                    // 每次都重新查窗口 —— 关到托盘后窗口会被销毁，重开时是新句柄。
-                    let self_focused = app_handle
-                        .get_webview_window("main")
-                        .and_then(|w| w.is_focused().ok())
-                        .unwrap_or(false);
-
-                    if !self_focused {
-                        let key = ev.name.to_lowercase();
-
-                        if let Some(audio) = state.audio() {
-                            audio.play(ev.device, &key, ev.pressed);
-                        }
-
-                        // 语音只在按下时播，抬起再读一遍会翻倍。
-                        if ev.pressed && state.voice_enabled.load(Ordering::Relaxed) {
-                            let lang = *state.voice_lang.lock().unwrap();
-                            if let Some(text) = speech::spoken_text(ev.device, &key, lang) {
-                                let volume = *state.volume.lock().unwrap();
-                                let _ = app_handle.run_on_main_thread(move || {
-                                    speech::speak(&text, lang, volume);
-                                });
-                            }
-                        }
-                    }
-
-                    let _ = app_handle.emit(
-                        "key-event",
-                        serde_json::json!({
-                            "device": ev.device.as_str(),
-                            "code": ev.code,
-                            "name": ev.name,
-                            "pressed": ev.pressed,
-                            "latency_ms": latency_ms.min(999.0),
-                        }),
-                    );
-                }
-            })
-            .map_err(|e| format!("无法启动消费线程: {e}"))?;
-    }
+    ensure_hook(app)?;
 
     state.enabled.store(true, Ordering::SeqCst);
     state.sync_tray(true);
@@ -896,9 +840,652 @@ fn apply_enabled_inner(app: &tauri::AppHandle, enabled: bool) -> Result<bool, St
     Ok(true)
 }
 
+/// 启动全局输入钩子和消费线程。
+///
+/// 按键音和木鱼共用这一套：谁先开谁负责启动，后开的那位发现已经在跑就直接复用。
+/// 所以钩子的生命周期不再等于「按键音开关」，而是「任一功能开着」。
+fn ensure_hook(app: &tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if state.hook_started.swap(true, Ordering::SeqCst) {
+        return Ok(());
+    }
+
+    let (tx, rx) = crossbeam_channel::unbounded::<hook::InputEvent>();
+
+    hook::start(tx).map_err(|e| {
+        state.hook_started.store(false, Ordering::SeqCst);
+        e
+    })?;
+
+    // 消费线程：播放音频 + 语音播报 + 木鱼计数 + 把事件推给前端。
+    // 播放必须离开钩子回调线程，否则系统会因为回调超时把 tap 禁用。
+    let app_handle = app.clone();
+    std::thread::Builder::new()
+        .name("kbs-consumer".into())
+        .spawn(move || {
+            let state = app_handle.state::<AppState>();
+            let mut down: Vec<(Device, u32)> = Vec::new();
+            let mut last_pending_emit = std::time::Instant::now();
+
+            for ev in rx {
+                // 长按会被系统连发，重复的按下事件直接丢弃。
+                let id = (ev.device, ev.code);
+                if ev.pressed {
+                    if down.contains(&id) {
+                        continue;
+                    }
+                    down.push(id);
+                } else {
+                    down.retain(|c| *c != id);
+                }
+
+                // 本应用在前台时不发声、也不记功德：用户点自己的界面、在自己的窗口里
+                // 打字，不该被自己的音效吵到，也不该给自己刷功德。
+                // 每次都重新查窗口 —— 关到托盘后窗口会被销毁，重开时是新句柄。
+                let self_focused = app_handle
+                    .get_webview_window("main")
+                    .and_then(|w| w.is_focused().ok())
+                    .unwrap_or(false);
+
+                // 木鱼计数与按键音开关无关：只要木鱼开着，按一下就攒一笔。
+                if ev.pressed && !self_focused && state.muyu.enabled() {
+                    state.muyu.hit();
+                    // 库存提示节流 120ms，别让每次击键都过一次 IPC
+                    if last_pending_emit.elapsed() >= Duration::from_millis(120) {
+                        last_pending_emit = std::time::Instant::now();
+                        let _ = app_handle.emit(
+                            "muyu-pending",
+                            serde_json::json!({
+                                "pending": state.muyu.pending(),
+                                "today": state.muyu.today(),
+                            }),
+                        );
+                    }
+                }
+
+                if !state.enabled.load(Ordering::Relaxed) {
+                    continue;
+                }
+
+                let latency_ms = now_ns().saturating_sub(ev.timestamp_ns) as f64 / 1_000_000.0;
+
+                // 事件照常推给前端，日志还能看。
+                if !self_focused {
+                    let key = ev.name.to_lowercase();
+
+                    if let Some(audio) = state.audio() {
+                        audio.play(ev.device, &key, ev.pressed);
+                    }
+
+                    // 语音只在按下时播，抬起再读一遍会翻倍。
+                    if ev.pressed && state.voice_enabled.load(Ordering::Relaxed) {
+                        let lang = *state.voice_lang.lock().unwrap();
+                        if let Some(text) = speech::spoken_text(ev.device, &key, lang) {
+                            let volume = *state.volume.lock().unwrap();
+                            let _ = app_handle.run_on_main_thread(move || {
+                                speech::speak(&text, lang, volume);
+                            });
+                        }
+                    }
+                }
+
+                let _ = app_handle.emit(
+                    "key-event",
+                    serde_json::json!({
+                        "device": ev.device.as_str(),
+                        "code": ev.code,
+                        "name": ev.name,
+                        "pressed": ev.pressed,
+                        "latency_ms": latency_ms.min(999.0),
+                    }),
+                );
+            }
+        })
+        .map_err(|e| format!("无法启动消费线程: {e}"))?;
+
+    Ok(())
+}
+
 #[tauri::command]
 fn set_enabled(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
     apply_enabled(&app, enabled)
+}
+
+/* ---------------- 木鱼 ---------------- */
+
+/// 木鱼开关的唯一入口：菜单栏和界面都走这里，保证状态一致。
+///
+/// 失败时把内部状态和托盘勾选一起退回「关」—— 权限没给却显示已开启，
+/// 用户会以为功能坏了。
+///
+/// 注意这里**不写盘**：失败往往发生在启动阶段（新包还没拿到辅助功能授权），
+/// 此时内存里的 enabled 可能还是 false，一 persist 就会把用户「按键音开着」
+/// 的偏好覆盖成关。设置文件保持原样，下次启动再试。
+fn apply_muyu(app: &tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    match apply_muyu_inner(app, enabled) {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            let state = app.state::<AppState>();
+            state.muyu.set_enabled(false);
+            state.sync_muyu_tray(false);
+            Err(e)
+        }
+    }
+}
+
+fn apply_muyu_inner(app: &tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    let state = app.state::<AppState>();
+
+    if !enabled {
+        state.muyu.set_enabled(false);
+        state.muyu.save();
+        let _ = sync_muyu_window(app);
+        state.sync_muyu_tray(false);
+        state.persist();
+        let _ = app.emit("muyu-state", serde_json::json!({ "enabled": false }));
+        return Ok(false);
+    }
+
+    // 木鱼和按键音共用同一个全局钩子，权限是硬门槛
+    if !hook::is_trusted() {
+        return Err("missing-permission".into());
+    }
+
+    ensure_hook(app)?;
+    state.muyu.set_enabled(true);
+    sync_muyu_window(app)?;
+    state.sync_muyu_tray(true);
+    state.persist();
+    let _ = app.emit("muyu-state", serde_json::json!({ "enabled": true }));
+    Ok(true)
+}
+
+fn destroy_muyu_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("muyu") {
+        let _ = window.destroy();
+    }
+}
+
+/// 挂件尺寸：设计基准 240×300，整体按 scale 缩放。
+fn muyu_size(scale: f32) -> (f64, f64) {
+    let s = scale as f64;
+    (240.0 * s, 320.0 * s)
+}
+
+/// 把挂件调成「桌面挂件」该有的窗口行为。
+///
+/// 三件事：
+/// 1. `collectionBehavior` 补上 `CanJoinAllSpaces | Stationary | IgnoresCycle` ——
+///    跟着用户切桌面、Mission Control 里不乱跑、不参与 Cmd+` 循环
+/// 2. 提到 `NSStatusWindowLevel`（25）。Tauri 的 `always_on_top` 只是 floating level（3），
+///    会被别的应用的浮动面板压住
+/// 3. 关掉 `hidesOnDeactivate`，切到别的应用时不要自动隐藏
+///
+/// **关键**：这一堆必须在窗口 `show()` 之前设好。窗口一旦上屏，macOS 就把它绑在
+/// 当时那个 Space 上了，之后再改 collectionBehavior 不一定会重新生效 ——
+/// 表现就是「切个桌面挂件就不见了」。
+///
+/// 另外：别的应用进全屏时这个窗口仍然不显示。实测把 level 提到 1000（screenSaver 层级）
+/// 也没用，macOS 不允许第三方窗口进入其他应用的全屏 Space。
+#[cfg(target_os = "macos")]
+fn tune_widget_window(window: &tauri::WebviewWindow) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    const CAN_JOIN_ALL_SPACES: usize = 1 << 0;
+    const STATIONARY: usize = 1 << 4;
+    const IGNORES_CYCLE: usize = 1 << 6;
+    const FULLSCREEN_AUXILIARY: usize = 1 << 8;
+    const STATUS_LEVEL: isize = 8; // NSModalPanelWindowLevel
+
+    let Ok(ptr) = window.ns_window() else {
+        return;
+    };
+    let obj = ptr as *mut AnyObject;
+    unsafe {
+        let behavior: usize = msg_send![obj, collectionBehavior];
+        let want = behavior
+            | CAN_JOIN_ALL_SPACES
+            | STATIONARY
+            | IGNORES_CYCLE
+            | FULLSCREEN_AUXILIARY;
+        let _: () = msg_send![obj, setCollectionBehavior: want];
+        let _: () = msg_send![obj, setLevel: STATUS_LEVEL];
+        let _: () = msg_send![obj, setHidesOnDeactivate: false];
+
+        let after: usize = msg_send![obj, collectionBehavior];
+        if after != want {
+            eprintln!("[muyu] collectionBehavior 设置失败: {behavior} -> {after}");
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn tune_widget_window(_window: &tauri::WebviewWindow) {}
+
+/// 强制把窗口放到「当前正在看的那个 Space」上。
+///
+/// tao 的 `show()` 走的是 `orderFront:` —— 应用不在前台时，窗口会落到
+/// 应用自己的那个 Space，用户切了桌面就看不见。`orderFrontRegardless:`
+/// 不看激活状态，直接上屏到活动 Space。
+#[cfg(target_os = "macos")]
+fn order_front_regardless(window: &tauri::WebviewWindow) {
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
+
+    let Ok(ptr) = window.ns_window() else {
+        return;
+    };
+    let obj = ptr as *mut AnyObject;
+    unsafe {
+        let _: () = msg_send![obj, orderFrontRegardless];
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn order_front_regardless(_window: &tauri::WebviewWindow) {}
+
+/// 把挂件摆到屏幕上：拖过就还原坐标（并夹回屏幕内），没拖过就贴右下角。
+///
+/// 用 work_area 而不是 size，否则会压到 Dock / 菜单栏上。
+fn position_muyu_window(
+    app: &tauri::AppHandle,
+    window: &tauri::WebviewWindow,
+    w: f64,
+    h: f64,
+    pos: Option<(i32, i32)>,
+) {
+    let Ok(Some(monitor)) = app.primary_monitor() else {
+        return;
+    };
+
+    let area = monitor.work_area();
+    let sf = monitor.scale_factor();
+    let margin = 24.0 * sf;
+    let ax = area.position.x as f64;
+    let ay = area.position.y as f64;
+    let max_x = ax + area.size.width as f64 - w * sf - margin;
+    let max_y = ay + area.size.height as f64 - h * sf - margin;
+
+    let (x, y) = match pos {
+        // 拖过：保留用户的位置，但缩放变大后不能跑出屏幕
+        Some((px, py)) => (
+            (px as f64).clamp(ax + margin, max_x.max(ax + margin)),
+            (py as f64).clamp(ay + margin, max_y.max(ay + margin)),
+        ),
+        // 没拖过：贴右下角
+        None => (max_x, max_y),
+    };
+
+    let _ = window.set_position(tauri::PhysicalPosition::new(x as i32, y as i32));
+}
+
+/// 按当前状态同步挂件：开着就建 / 显示，关了就销毁。
+fn sync_muyu_window(app: &tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    if state.muyu.enabled() && state.muyu.window_visible() {
+        ensure_muyu_window(app, state.muyu.scale(), state.muyu.pos())
+    } else {
+        destroy_muyu_window(app);
+        Ok(())
+    }
+}
+
+/// 挂件窗口：透明、置顶、点击穿透。
+///
+/// 尺寸和位置由调用方传进来，不在这里读 AppState —— `--muyu-window`
+/// 调试模式没有 AppState，读了会直接 panic。
+fn ensure_muyu_window(
+    app: &tauri::AppHandle,
+    scale: f32,
+    pos: Option<(i32, i32)>,
+) -> Result<(), String> {
+    let (w, h) = muyu_size(scale);
+
+    if let Some(window) = app.get_webview_window("muyu") {
+        // 已经在了：尺寸可能刚被调过，同步一下再显示
+        let _ = window.set_size(tauri::LogicalSize::new(w, h));
+        tune_widget_window(&window);
+        let _ = window.show();
+        order_front_regardless(&window);
+        return Ok(());
+    }
+
+    // 建出来之后立刻把窗口行为调好，再用 orderFrontRegardless 强制上屏。
+    let window = WebviewWindowBuilder::new(app, "muyu", WebviewUrl::App("muyu.html".into()))
+        .title("木鱼")
+        .inner_size(w, h)
+        .resizable(false)
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .build()
+        .map_err(|e| format!("创建木鱼窗口失败: {e}"))?;
+
+    // 点击穿透：挂件不能挡住下面的任何操作。
+    let _ = window.set_ignore_cursor_events(true);
+
+    // 跟随所有桌面（Space）+ 状态栏层级，必须在 show 之前
+    let _ = window.set_visible_on_all_workspaces(true);
+    tune_widget_window(&window);
+
+    position_muyu_window(app, &window, w, h, pos);
+
+    window.show().map_err(|e| format!("显示木鱼窗口失败: {e}"))?;
+    order_front_regardless(&window);
+
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct MuyuInfo {
+    enabled: bool,
+    sound: bool,
+    volume: f32,
+    interval_ms: u64,
+    today: u64,
+    total: u64,
+    pending: u32,
+    window_visible: bool,
+    scale: f32,
+    /// 是否被拖动过（拖过就不再自动贴右下角）
+    has_pos: bool,
+}
+
+fn muyu_info(state: &AppState) -> MuyuInfo {
+    MuyuInfo {
+        enabled: state.muyu.enabled(),
+        sound: state.muyu.sound(),
+        volume: state.muyu.volume(),
+        interval_ms: state.muyu.interval_ms(),
+        today: state.muyu.today(),
+        total: state.muyu.total(),
+        pending: state.muyu.pending(),
+        window_visible: state.muyu.window_visible(),
+        scale: state.muyu.scale(),
+        has_pos: state.muyu.pos().is_some(),
+    }
+}
+
+#[tauri::command]
+fn get_muyu(state: State<'_, AppState>) -> MuyuInfo {
+    muyu_info(&state)
+}
+
+#[tauri::command]
+fn set_muyu(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    enabled: Option<bool>,
+    sound: Option<bool>,
+    volume: Option<f32>,
+    interval_ms: Option<u64>,
+    window: Option<bool>,
+    scale: Option<f32>,
+) -> Result<MuyuInfo, String> {
+    if let Some(on) = enabled {
+        apply_muyu(&app, on)?;
+    }
+    if let Some(on) = sound {
+        state.muyu.set_sound(on);
+    }
+    if let Some(v) = volume {
+        state.muyu.set_volume(v);
+    }
+    if let Some(ms) = interval_ms {
+        state.muyu.set_interval(ms);
+    }
+    if let Some(on) = window {
+        state.muyu.set_window_visible(on);
+        sync_muyu_window(&app)?;
+    }
+    if let Some(s) = scale {
+        state.muyu.set_scale(s);
+        // 窗口已经开着的话直接改尺寸，不用销毁重建
+        if let Some(w) = app.get_webview_window("muyu") {
+            let (width, height) = muyu_size(state.muyu.scale());
+            let _ = w.set_size(tauri::LogicalSize::new(width, height));
+            // 放大后可能顶出屏幕，重新摆一下
+            position_muyu_window(&app, &w, width, height, state.muyu.pos());
+        }
+    }
+    if sound.is_some()
+        || volume.is_some()
+        || interval_ms.is_some()
+        || window.is_some()
+        || scale.is_some()
+    {
+        state.persist();
+    }
+    Ok(muyu_info(&state))
+}
+
+/// 进入「调整位置」：临时关掉点击穿透，让用户能把挂件拖走。
+///
+/// 拖完自动恢复 —— 位置稳定 500ms 或者超时 15s。不这么做的话，
+/// 用户忘了退出这个模式，挂件就会一直挡着鼠标点击。
+#[tauri::command]
+fn begin_muyu_drag(app: tauri::AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("muyu")
+        .ok_or("木鱼挂件没有显示")?;
+
+    window
+        .set_ignore_cursor_events(false)
+        .map_err(|e| e.to_string())?;
+    let _ = window.emit("muyu-drag", serde_json::json!({ "on": true }));
+
+    // 起始坐标必须先读出来。之前用 None 起步，第一轮轮询「和 None 不相等」
+    // 就判定成"动过了"，500ms 后直接把穿透恢复，用户根本来不及按鼠标。
+    let start_pos = window.outer_position().ok().map(|p| (p.x, p.y));
+
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let started = std::time::Instant::now();
+        let mut last = start_pos;
+        let mut moved = false;
+        let mut stable = std::time::Instant::now();
+
+        loop {
+            std::thread::sleep(Duration::from_millis(120));
+
+            let Some(w) = handle.get_webview_window("muyu") else {
+                return;
+            };
+            let pos = w.outer_position().ok().map(|p| (p.x, p.y));
+
+            if let Some(p) = pos {
+                if last != Some(p) {
+                    moved = true;
+                    stable = std::time::Instant::now();
+                    last = Some(p);
+                }
+            }
+
+            // 动过、并且停稳 600ms 才算拖完；给足 30 秒让用户慢慢拖
+            if (moved && stable.elapsed() >= Duration::from_millis(600))
+                || started.elapsed() >= Duration::from_secs(30)
+            {
+                finish_muyu_drag(&handle, last);
+                return;
+            }
+        }
+    });
+
+    Ok(())
+}
+
+/// 结束「调整位置」：记下当前位置，恢复点击穿透。
+#[tauri::command]
+fn end_muyu_drag(app: tauri::AppHandle) {
+    let pos = app
+        .get_webview_window("muyu")
+        .and_then(|w| w.outer_position().ok())
+        .map(|p| (p.x, p.y));
+    finish_muyu_drag(&app, pos);
+}
+
+fn finish_muyu_drag(app: &tauri::AppHandle, pos: Option<(i32, i32)>) {
+    // --muyu-window 调试模式没有 AppState，这里不能直接 state()
+    if let Some(state) = app.try_state::<AppState>() {
+        if let Some(p) = pos {
+            state.muyu.set_pos(Some(p));
+            state.persist();
+        }
+    }
+    if let Some(window) = app.get_webview_window("muyu") {
+        let _ = window.set_ignore_cursor_events(true);
+        let _ = window.emit("muyu-drag", serde_json::json!({ "on": false }));
+    }
+}
+
+#[tauri::command]
+fn reset_muyu_today(app: tauri::AppHandle, state: State<'_, AppState>) -> MuyuInfo {
+    state.muyu.reset_today();
+    state.muyu.save();
+
+    // 挂件是独立窗口，不通知它的话只有设置页的数字归零，桌面还挂在旧值上
+    if let Some(window) = app.get_webview_window("muyu") {
+        let _ = window.emit("muyu-reset", serde_json::json!({ "today": 0 }));
+    }
+
+    muyu_info(&state)
+}
+
+/* ---------------- 木鱼素材（可替换） ---------------- */
+
+/// 内置素材。用户把同名文件放进数据目录的 muyu/ 下就会覆盖它。
+const FISH_PNG: &[u8] = include_bytes!("../../dist/muyu-fish.png");
+const MALLET_PNG: &[u8] = include_bytes!("../../dist/muyu-mallet.png");
+
+fn muyu_asset_dir(app: &tauri::AppHandle) -> Option<PathBuf> {
+    app.path().app_data_dir().ok().map(|d| d.join("muyu"))
+}
+
+/// 首次运行把默认素材写出来，用户直接替换同名文件即可。
+fn ensure_muyu_assets(app: &tauri::AppHandle) {
+    let Some(dir) = muyu_asset_dir(app) else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&dir);
+    for (name, bytes) in [("fish.png", FISH_PNG), ("mallet.png", MALLET_PNG)] {
+        let path = dir.join(name);
+        if !path.exists() {
+            let _ = std::fs::write(&path, bytes);
+        }
+    }
+}
+
+fn mime_of(bytes: &[u8]) -> &'static str {
+    match bytes {
+        [0x89, 0x50, 0x4E, 0x47, ..] => "image/png",
+        [0xFF, 0xD8, 0xFF, ..] => "image/jpeg",
+        [0x47, 0x49, 0x46, 0x38, ..] => "image/gif",
+        b if b.len() > 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP" => "image/webp",
+        _ => "application/octet-stream",
+    }
+}
+
+/// 读用户素材；没有（或太大）就退回内置的。返回 (mime, bytes, 是否为用户替换)。
+fn load_asset(
+    app: &tauri::AppHandle,
+    stem: &str,
+    fallback: &'static [u8],
+) -> (String, Vec<u8>, bool) {
+    const MAX: usize = 8 * 1024 * 1024;
+
+    if let Some(dir) = muyu_asset_dir(app) {
+        for ext in ["png", "jpg", "jpeg", "webp", "gif"] {
+            let path = dir.join(format!("{stem}.{ext}"));
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            if bytes.is_empty() || bytes.len() > MAX {
+                eprintln!("[muyu] 素材 {} 无效或过大，忽略", path.display());
+                continue;
+            }
+            let custom = bytes != fallback;
+            return (mime_of(&bytes).to_string(), bytes, custom);
+        }
+    }
+    ("image/png".to_string(), fallback.to_vec(), false)
+}
+
+#[derive(Serialize)]
+struct MuyuAssets {
+    /// data URL，前端直接塞给 <img src>
+    fish: String,
+    mallet: String,
+    /// 素材目录，设置页「打开素材目录」用
+    dir: String,
+    fish_custom: bool,
+    mallet_custom: bool,
+}
+
+#[tauri::command]
+fn get_muyu_assets(app: tauri::AppHandle) -> MuyuAssets {
+    use base64::Engine;
+    let enc = base64::engine::general_purpose::STANDARD;
+
+    let (fish_mime, fish_bytes, fish_custom) = load_asset(&app, "fish", FISH_PNG);
+    let (mallet_mime, mallet_bytes, mallet_custom) = load_asset(&app, "mallet", MALLET_PNG);
+
+    MuyuAssets {
+        fish: format!("data:{fish_mime};base64,{}", enc.encode(&fish_bytes)),
+        mallet: format!("data:{mallet_mime};base64,{}", enc.encode(&mallet_bytes)),
+        dir: muyu_asset_dir(&app)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default(),
+        fish_custom,
+        mallet_custom,
+    }
+}
+
+#[tauri::command]
+fn open_muyu_assets_folder(app: tauri::AppHandle) -> Result<(), String> {
+    let dir = muyu_asset_dir(&app).ok_or("找不到数据目录")?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建素材目录失败: {e}"))?;
+    std::process::Command::new("open")
+        .arg(&dir)
+        .spawn()
+        .map_err(|e| format!("打开目录失败: {e}"))?;
+    Ok(())
+}
+
+/// 用户换完图点「重新加载」：通知挂件重新取一次素材。
+#[tauri::command]
+fn reload_muyu_assets(app: tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("muyu") {
+        let _ = window.emit("muyu-assets", serde_json::json!({}));
+    }
+}
+
+/// 试听：直接敲一下，不记账。设置页的「试听」按钮走这里。
+#[tauri::command]
+fn preview_muyu(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    let audio = state.audio().ok_or("audio-unavailable")?;
+    audio.play_muyu(state.muyu.volume());
+
+    if let Some(window) = app.get_webview_window("muyu") {
+        let _ = window.emit(
+            "muyu-hit",
+            serde_json::json!({
+                "delta": 1,
+                "today": state.muyu.today(),
+                "pending": state.muyu.pending(),
+            }),
+        );
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn toggle_muyu(app: tauri::AppHandle) -> Result<bool, String> {
+    let state = app.state::<AppState>();
+    apply_muyu(&app, !state.muyu.enabled())
 }
 
 fn now_ns() -> u64 {
@@ -1166,6 +1753,111 @@ fn main() {
         return;
     }
 
+    if args.iter().any(|a| a == "--muyu-selftest") {
+        if let Err(e) = muyu_selftest() {
+            eprintln!("木鱼自检失败: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
+    // 只弹木鱼挂件：不装输入钩子、不建托盘。用来单独调窗口外观和动画。
+    // 加 `--hits N` 会真的跑一遍「入队 → 节拍 → 出声 → 事件 → 动画」，
+    // 不需要辅助功能权限，可以和正式版同时跑。
+    // generate_context! 一个 crate 只能展开一次，所以先算出来给两条分支共用。
+    let context = tauri::generate_context!();
+
+    if args.iter().any(|a| a == "--muyu-window") {
+        let hits: u32 = args
+            .iter()
+            .position(|a| a == "--hits")
+            .and_then(|i| args.get(i + 1))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
+        let scale: f32 = args
+            .iter()
+            .position(|a| a == "--scale")
+            .and_then(|i| args.get(i + 1))
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1.0);
+
+        let drag_test = args.iter().any(|a| a == "--drag-test");
+
+        tauri::Builder::default()
+            .setup(move |app| {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+                #[cfg(target_os = "macos")]
+                let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+                ensure_muyu_window(app.handle(), scale, None)?;
+
+                // 拖动链路自测：不需要辅助功能权限，用来验证
+                // 指针事件 → setPosition → 窗口真的移动
+                if drag_test {
+                    let h = app.handle().clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(1500));
+                        if let Some(w) = h.get_webview_window("muyu") {
+                            let _ = w.set_ignore_cursor_events(false);
+                            let _ = w.emit("muyu-drag", serde_json::json!({ "on": true }));
+                            eprintln!("[drag] 已进入拖动模式");
+                        }
+                    });
+                }
+
+                if hits > 0 {
+                    let dir = std::env::temp_dir().join("keytone-muyu-window");
+                    let _ = std::fs::remove_dir_all(&dir);
+                    let _ = std::fs::create_dir_all(&dir);
+
+                    let state = Arc::new(muyu::Muyu::load(
+                        &dir,
+                        true,
+                        true,
+                        0.9,
+                        muyu::DEFAULT_INTERVAL_MS,
+                        true,
+                        1.0,
+                        None,
+                    ));
+                    let audio = AudioHandle::spawn().ok();
+                    let handle = app.handle().clone();
+                    let player = audio.clone();
+
+                    muyu::spawn_metronome(state.clone(), move |delta, today, pending| {
+                        if let Some(audio) = &player {
+                            audio.play_muyu(0.9);
+                        }
+                        if let Some(window) = handle.get_webview_window("muyu") {
+                            let _ = window.emit(
+                                "muyu-hit",
+                                serde_json::json!({
+                                    "delta": delta,
+                                    "today": today,
+                                    "pending": pending,
+                                }),
+                            );
+                        }
+                    });
+
+                    // 等窗口把事件监听起来，再模拟一串按键
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_millis(900));
+                        for _ in 0..hits {
+                            state.hit();
+                            std::thread::sleep(Duration::from_millis(90));
+                        }
+                    });
+                }
+                Ok(())
+            })
+            .run(context)
+            .expect("error while running tauri application");
+        return;
+    }
+
     let app = tauri::Builder::default()
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
@@ -1176,6 +1868,15 @@ fn main() {
             if let Err(e) = synth::ensure_demo_profiles(&profiles_dir) {
                 eprintln!("[synth] {e}");
             }
+
+            // 木鱼素材：首次运行把默认图写到数据目录，用户替换同名文件即可
+            ensure_muyu_assets(app.handle());
+
+            // 常驻菜单栏的应用必须用 accessory 策略。
+            // regular（有 Dock 图标）时，应用不在前台新建的窗口会被丢到
+            // 「应用自己的那个 Space」上 —— 用户切个桌面挂件就看不见了。
+            #[cfg(target_os = "macos")]
+            let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             // 补装内置的原版音色包（已存在的跳过）。
             match bundled::install_missing(&profiles_dir) {
@@ -1188,6 +1889,17 @@ fn main() {
 
             let settings = config::load(&data_dir);
             let profiles = profile::scan(&profiles_dir);
+
+            let muyu_state = Arc::new(muyu::Muyu::load(
+                &data_dir,
+                settings.muyu_enabled,
+                settings.muyu_sound,
+                settings.muyu_volume,
+                settings.muyu_interval_ms,
+                settings.muyu_window,
+                settings.muyu_scale,
+                settings.muyu_x.zip(settings.muyu_y),
+            ));
 
             let state = AppState {
                 audio: OnceLock::new(),
@@ -1205,6 +1917,8 @@ fn main() {
                 theme: Mutex::new(settings.theme.clone()),
                 tray_style: Mutex::new(settings.tray_style.clone()),
                 tray_toggle: Mutex::new(None),
+                muyu: muyu_state.clone(),
+                muyu_toggle: Mutex::new(None),
             };
 
             // 提前打开音频设备：冷启动建流有几十毫秒开销，不能放在第一次按键上。
@@ -1251,12 +1965,21 @@ fn main() {
             // ---- 菜单栏托盘 ----
             let toggle_item =
                 CheckMenuItem::with_id(app, "toggle", "启用按键音", true, false, None::<&str>)?;
+            let muyu_item = CheckMenuItem::with_id(
+                app,
+                "muyu",
+                "木鱼",
+                true,
+                settings.muyu_enabled,
+                None::<&str>,
+            )?;
             let show_item = MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let menu = Menu::with_items(
                 app,
                 &[
                     &toggle_item,
+                    &muyu_item,
                     &PredefinedMenuItem::separator(app)?,
                     &show_item,
                     &quit_item,
@@ -1264,6 +1987,7 @@ fn main() {
             )?;
 
             *state.tray_toggle.lock().unwrap() = Some(toggle_item);
+            *state.muyu_toggle.lock().unwrap() = Some(muyu_item);
 
             // 菜单栏图标：金色线稿原样显示，单色版走模板（系统自动反色）。
             let use_mono = settings.tray_style == "mono";
@@ -1288,6 +2012,18 @@ fn main() {
                             }
                         }
                         "show" => show_main_window(app),
+                        "muyu" => {
+                            let state = app.state::<AppState>();
+                            let next = !state.muyu.enabled();
+                            if let Err(e) = apply_muyu(app, next) {
+                                eprintln!("[tray] 木鱼切换失败: {e}");
+                                // 勾选状态由 apply_muyu 内部退回，这里只负责告诉用户为什么。
+                                // 没授权时把主窗口拉出来，界面上有「去授权」的入口。
+                                if e == "missing-permission" {
+                                    show_main_window(app);
+                                }
+                            }
+                        }
                         "quit" => app.exit(0),
                         _ => {}
                     })
@@ -1295,13 +2031,42 @@ fn main() {
             }
 
             let was_enabled = settings.enabled;
+            let was_muyu = settings.muyu_enabled;
             apply_window_theme(app.handle(), &settings.theme);
             app.manage(state);
+
+            // 木鱼节拍线程：敲一下 → 出声 + 通知挂件。
+            // 声音在这里发，动画通过事件交给前端，两边同一时刻触发。
+            let tick_app = app.handle().clone();
+            muyu::spawn_metronome(muyu_state.clone(), move |delta, today, pending| {
+                let state = tick_app.state::<AppState>();
+                if state.muyu.sound() {
+                    if let Some(audio) = state.audio() {
+                        audio.play_muyu(state.muyu.volume());
+                    }
+                }
+                if let Some(window) = tick_app.get_webview_window("muyu") {
+                    let _ = window.emit(
+                        "muyu-hit",
+                        serde_json::json!({
+                            "delta": delta,
+                            "today": today,
+                            "pending": pending,
+                        }),
+                    );
+                }
+            });
 
             // 恢复上次的启用状态：用户既然开着，就不该每次启动都要再点一下。
             if was_enabled {
                 if let Err(e) = apply_enabled(app.handle(), true) {
                     eprintln!("[state] 恢复启用状态失败: {e}");
+                }
+            }
+
+            if was_muyu {
+                if let Err(e) = apply_muyu(app.handle(), true) {
+                    eprintln!("[muyu] 恢复木鱼失败: {e}");
                 }
             }
 
@@ -1339,18 +2104,34 @@ fn main() {
             open_url,
             open_accessibility_settings,
             open_profiles_folder,
-            preview
+            preview,
+            get_muyu,
+            set_muyu,
+            toggle_muyu,
+            preview_muyu,
+            reset_muyu_today,
+            begin_muyu_drag,
+            end_muyu_drag,
+            get_muyu_assets,
+            open_muyu_assets_folder,
+            reload_muyu_assets
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application");
 
-    app.run(|_app, event| {
+    app.run(|app, event| match event {
         // 窗口全销毁时不要退出进程（托盘还在），只有显式 quit 才走。
-        if let tauri::RunEvent::ExitRequested { api, code, .. } = event {
+        tauri::RunEvent::ExitRequested { api, code, .. } => {
             if code.is_none() {
                 api.prevent_exit();
             }
         }
+        // 退出前把功德落盘，别丢最后几秒
+        tauri::RunEvent::Exit => {
+            let state = app.state::<AppState>();
+            state.muyu.flush();
+        }
+        _ => {}
     });
 }
 
@@ -1401,5 +2182,73 @@ fn selftest() -> Result<(), String> {
 
     std::thread::sleep(Duration::from_millis(300));
     println!("selftest ok");
+    Ok(())
+}
+
+/// 木鱼自检：不开界面、不需要辅助功能权限，只验证
+/// 「输入进队列 → 固定节拍敲出 → 功德落盘」这条链路。
+///
+/// 用法：`keytone --muyu-selftest`
+fn muyu_selftest() -> Result<(), String> {
+    let dir = std::env::temp_dir().join("keytone-muyu-test");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建测试目录失败: {e}"))?;
+
+    let state = Arc::new(muyu::Muyu::load(
+        &dir,
+        true,
+        true,
+        0.9,
+        muyu::DEFAULT_INTERVAL_MS,
+        true,
+        1.0,
+        None,
+    ));
+    let audio = AudioHandle::spawn()?;
+    audio.set_volume(1.0);
+
+    let started = std::time::Instant::now();
+    let player = audio.clone();
+    muyu::spawn_metronome(state.clone(), move |delta, today, pending| {
+        player.play_muyu(0.9);
+        println!(
+            "{:>5}ms  敲 {}  今日 {}  库存 {}",
+            started.elapsed().as_millis(),
+            delta,
+            today,
+            pending
+        );
+    });
+
+    // 模拟一串不均匀的按键。输入时刻是随机的，敲击应该落在等距网格上。
+    for gap in [0u64, 55, 40, 95, 30, 70, 45] {
+        std::thread::sleep(Duration::from_millis(gap));
+        state.hit();
+    }
+    println!("输入完成，库存 {}", state.pending());
+
+    // 停下来 2s 才开始结算，再按 500ms 一下敲完，留足余量
+    for _ in 0..120 {
+        if state.pending() == 0 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    state.flush();
+
+    let today = state.today();
+    let left = state.pending();
+    println!("结果：今日功德 {today}，剩余库存 {left}");
+    if today != 7 || left != 0 {
+        return Err(format!("期望敲 7 下且库存清空，实际 {today} 下、剩 {left}"));
+    }
+
+    let file = dir.join("muyu.json");
+    let text = std::fs::read_to_string(&file).map_err(|e| format!("没有落盘: {e}"))?;
+    println!("落盘 {}: {}", file.display(), text.replace('\n', " "));
+
+    std::thread::sleep(Duration::from_millis(300));
+    println!("muyu selftest ok");
     Ok(())
 }

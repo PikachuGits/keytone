@@ -89,6 +89,8 @@ enum Cmd {
     Play { device: Device, key: String, pressed: bool },
     Profile { device: Device, profile: Arc<CompiledProfile> },
     Volume(f32),
+    /// 敲一下木鱼。`gain` 是木鱼自己的音量，最终还会再乘主音量。
+    Muyu { gain: f32 },
 }
 
 #[derive(Clone)]
@@ -115,6 +117,7 @@ impl AudioHandle {
                                 Device::Mouse => engine.mouse = Some(profile),
                             },
                             Cmd::Volume(v) => engine.volume = v,
+                            Cmd::Muyu { gain } => engine.play_muyu(gain),
                         }
                     }
                 }
@@ -153,6 +156,11 @@ impl AudioHandle {
     pub fn set_volume(&self, volume: f32) {
         let _ = self.tx.send(Cmd::Volume(volume.clamp(0.0, 1.0)));
     }
+
+    /// 敲木鱼。和键盘音共用同一个 mixer，所以两者叠加而不是互相打断。
+    pub fn play_muyu(&self, gain: f32) {
+        let _ = self.tx.send(Cmd::Muyu { gain });
+    }
 }
 
 struct Engine {
@@ -163,6 +171,8 @@ struct Engine {
     mouse: Option<Arc<CompiledProfile>>,
     volume: f32,
     rng: u32,
+    /// 木鱼采样，启动时解码一次，之后每次敲只是 clone 一份丢进 mixer。
+    muyu: Option<SamplesBuffer>,
 }
 
 impl Engine {
@@ -172,6 +182,18 @@ impl Engine {
 
         let sample_rate = sink.config().sample_rate().get();
 
+        let muyu = match decode_bytes(crate::muyu::SAMPLE_WAV) {
+            Ok(decoded) => {
+                // 归一化到 0.9，和音色包的处理保持一致，避免切来切去音量跳变
+                let gain = 0.9 / decoded.peak().max(0.001);
+                Some(decoded.into_buffer(gain))
+            }
+            Err(e) => {
+                eprintln!("[muyu] 采样解码失败，木鱼将静音: {e}");
+                None
+            }
+        };
+
         Ok(Self {
             sink,
             sample_rate,
@@ -179,6 +201,7 @@ impl Engine {
             mouse: None,
             volume: 0.8,
             rng: 0x2545_F491,
+            muyu,
         })
     }
 
@@ -227,6 +250,15 @@ impl Engine {
         // Mixer 会做混音，同时按下多个键不会互相打断。
         self.sink.mixer().add(buffer.clone().amplify(self.volume));
     }
+
+    /// 敲木鱼。走同一个 mixer，和键盘音是叠加关系。
+    fn play_muyu(&mut self, gain: f32) {
+        let Some(buffer) = self.muyu.as_ref() else {
+            return;
+        };
+        let gain = (self.volume * gain).clamp(0.0, 1.5);
+        self.sink.mixer().add(buffer.clone().amplify(gain));
+    }
 }
 
 /// rodio 默认把缓冲设成 sample_rate/20（48k 下是 2048 帧），
@@ -266,6 +298,31 @@ pub fn decode_file(path: &Path) -> Result<DecodedAudio, String> {
         Ok(buf) => Ok(buf),
         Err(first) => decode_with(path, false).map_err(|_| first),
     }
+}
+
+/// 从内存字节解码。内置的木鱼采样编译进二进制，没有文件路径可给。
+///
+/// 这里不开 gapless：采样已经手工裁过首尾静音，再裁一次容易把起音削掉。
+pub fn decode_bytes(data: &'static [u8]) -> Result<DecodedAudio, String> {
+    let decoder = Decoder::builder()
+        .with_data(std::io::Cursor::new(data))
+        .with_gapless(false)
+        .build()
+        .map_err(|e| format!("解码失败: {e}"))?;
+
+    let channels: ChannelCount = decoder.channels();
+    let sample_rate: SampleRate = decoder.sample_rate();
+    let data: Vec<f32> = decoder.collect();
+
+    if data.is_empty() {
+        return Err("解码后没有音频数据".into());
+    }
+
+    Ok(DecodedAudio {
+        channels,
+        sample_rate,
+        data,
+    })
 }
 
 fn decode_with(path: &Path, gapless: bool) -> Result<DecodedAudio, String> {

@@ -377,6 +377,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 5 6 9H3v6h3l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>
         语音播报
       </button>
+      <button class="nav-item" data-view="muyu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="14" r="7"/><path d="M6.4 12.4c3 1.3 6.2 1.3 9.2 0"/><path d="M16.4 6.2 20.6 3.4"/><circle cx="20.8" cy="3.2" r="1.3"/></svg>
+        木鱼
+      </button>
       <button class="nav-item" data-view="settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.6 1.7 1.7 0 0 0-1.9.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0-1.2-2.9H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.6-1.1 1.7 1.7 0 0 0-.4-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"/></svg>
         设置
@@ -510,6 +514,88 @@
         </div>
       </section>
 
+      <!-- 木鱼 -->
+      <section class="view" data-view="muyu">
+        <div class="card">
+          <div class="hero">
+            <div class="txt">
+              <div class="big" id="muyuTitle">木鱼已关闭</div>
+              <div class="hint" id="muyuHint">打开后每次按键都会攒功德，木鱼按固定节拍敲出来</div>
+            </div>
+            <div class="switch" id="muyuSwitch"></div>
+          </div>
+        </div>
+
+        <div class="grid3">
+          <div class="stat"><div class="k">今日功德</div><div class="v" id="muyuToday">0</div></div>
+          <div class="stat"><div class="k">累计功德</div><div class="v" id="muyuTotal">0</div></div>
+          <div class="stat"><div class="k">待敲</div><div class="v" id="muyuPending">0</div></div>
+        </div>
+
+        <div class="card">
+          <h2>敲击</h2>
+          <div class="row">
+            <span class="lbl">频率</span>
+            <input type="range" id="muyuInterval" min="150" max="2000" step="50" value="500" style="flex:1" />
+            <span class="val" id="muyuIntervalVal">500ms</span>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <span class="lbl">音量</span>
+            <input type="range" id="muyuVolume" min="0" max="100" value="85" style="flex:1" />
+            <span class="val" id="muyuVolVal">85%</span>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn" id="muyuTestBtn">试听</button>
+          </div>
+          <div class="note">
+            输入只累计、不出声。手停下来 <b>2 秒</b>后开始结算，然后每隔
+            <b id="muyuIntervalNote">500ms</b> 匀速敲一下，敲一下库存减一、功德加一，
+            敲空为止。这样敲击和键盘音完全错开，也不会忽快忽慢。
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>桌面挂件</h2>
+          <div class="row">
+            <span class="lbl">显示挂件</span>
+            <div class="switch" id="muyuWindowSwitch" style="margin-left:auto"></div>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <span class="lbl">大小</span>
+            <input type="range" id="muyuScale" min="70" max="150" value="100" style="flex:1" />
+            <span class="val" id="muyuScaleVal">100%</span>
+          </div>
+          <div class="row" style="margin-top:12px">
+            <button class="btn" id="muyuMoveBtn">调整位置</button>
+            <span class="note" id="muyuMoveNote" style="margin:0 0 0 10px">
+              点一下挂件会变成可拖动，松手自动保存位置
+            </span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>素材</h2>
+          <div class="note" style="margin:0 0 10px">
+            木鱼和木槌是两张透明底图片，放在数据目录的 <b>muyu/</b> 下。
+            换成同名文件（png / jpg / webp）就能用你自己的图。布局按 240×300 的画布：
+            木鱼 196px 宽居中偏下，木槌 160px 宽摆在上方。
+          </div>
+          <div class="row">
+            <button class="btn" id="muyuAssetsBtn">打开素材目录</button>
+            <button class="btn" id="muyuReloadBtn">重新加载</button>
+            <span class="note" id="muyuAssetsNote" style="margin:0 0 0 10px"></span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>数据</h2>
+          <div class="note" style="margin:0 0 10px">
+            功德按本地日期跨天清零，存在 muyu.json。桌面上那个挂件点一下就穿透，不会挡住任何操作。
+          </div>
+          <button class="btn" id="muyuResetBtn">重置今日</button>
+        </div>
+      </section>
+
       <!-- 设置 -->
       <section class="view" data-view="settings">
         <div class="card">
@@ -599,6 +685,9 @@ let state = {
   enabled: false, voice: true, lang: 'zh', volume: 0.8,
   theme: 'auto', tray: 'gold', version: '0.1.0', repo: '', trusted: false,
 };
+
+/* 预览模式的木鱼数据 */
+const MOCK_MUYU = { enabled: true, sound: true, volume: 0.85, interval_ms: 500, today: 1284, total: 20480, pending: 3, window_visible: true, scale: 1, has_pos: false };
 let count = 0;
 
 const el = (id) => document.getElementById(id);
@@ -637,6 +726,22 @@ const invoke = PREVIEW
         MOCK[args.device].forEach(p => p.active = p.name === args.name);
         return { name: args.name, sources: 3, samples: 6 };
       }
+      if (cmd === 'get_muyu') return { ...MOCK_MUYU };
+      if (cmd === 'set_muyu') {
+        if (args.window != null) MOCK_MUYU.window_visible = args.window;
+        if (args.scale != null) MOCK_MUYU.scale = args.scale;
+        if (args.enabled != null) MOCK_MUYU.enabled = args.enabled;
+        if (args.sound != null) MOCK_MUYU.sound = args.sound;
+        if (args.volume != null) MOCK_MUYU.volume = args.volume;
+        if (args.intervalMs != null) MOCK_MUYU.interval_ms = args.intervalMs;
+        return { ...MOCK_MUYU };
+      }
+      if (cmd === 'begin_muyu_drag' || cmd === 'end_muyu_drag') return null;
+      if (cmd === 'open_muyu_assets_folder') return null;
+      if (cmd === 'reload_muyu_assets') return null;
+      if (cmd === 'get_muyu_assets') return { fish: '', mallet: '', dir: '/tmp', fish_custom: false, mallet_custom: false };
+      if (cmd === 'preview_muyu') return null;
+      if (cmd === 'reset_muyu_today') { MOCK_MUYU.today = 0; return { ...MOCK_MUYU }; }
       return null;
     }
   : TAURI.core.invoke;
@@ -874,6 +979,136 @@ document.querySelectorAll('#langSeg button').forEach(b => {
 });
 
 el('sampleBtn').addEventListener('click', () => invoke('speak_sample', { lang: state.lang }));
+
+/* ---------- 木鱼 ---------- */
+let muyuState = { enabled: false, sound: true, volume: 0.85, interval_ms: 500, today: 0, total: 0, pending: 0 };
+
+function setMuyuUi(m) {
+  if (!m) return;
+  muyuState = m;
+  el('muyuSwitch').classList.toggle('on', !!m.enabled);
+  el('muyuTitle').textContent = m.enabled ? '木鱼已开启' : '木鱼已关闭';
+  el('muyuHint').textContent = m.enabled
+    ? '敲键盘、点鼠标都在攒功德，木鱼按节拍把它们敲出来'
+    : '打开后每次按键都会攒功德，木鱼按固定节拍敲出来';
+  el('muyuToday').textContent = (m.today || 0).toLocaleString('zh-CN');
+  el('muyuTotal').textContent = (m.total || 0).toLocaleString('zh-CN');
+  el('muyuPending').textContent = m.pending || 0;
+
+  const interval = m.interval_ms || 500;
+  el('muyuInterval').value = interval;
+  el('muyuIntervalVal').textContent = interval + 'ms';
+  el('muyuIntervalNote').textContent = interval + 'ms';
+
+  const vol = Math.round((m.volume == null ? 0.85 : m.volume) * 100);
+  el('muyuVolume').value = vol;
+  el('muyuVolVal').textContent = vol + '%';
+
+  const showWin = m.window_visible !== false;
+  el('muyuWindowSwitch').classList.toggle('on', showWin);
+  const scalePct = Math.round((m.scale == null ? 1 : m.scale) * 100);
+  el('muyuScale').value = scalePct;
+  el('muyuScaleVal').textContent = scalePct + '%';
+  // 挂件没显示的时候，「调整位置」没有意义
+  const canMove = !!m.enabled && showWin;
+  el('muyuMoveBtn').disabled = !canMove;
+  el('muyuMoveBtn').style.opacity = canMove ? '' : '.45';
+}
+
+invoke('get_muyu').then(setMuyuUi).catch(() => {});
+
+el('muyuSwitch').addEventListener('click', async () => {
+  try {
+    setMuyuUi(await invoke('set_muyu', { enabled: !muyuState.enabled }));
+  } catch (e) {
+    // 没授权时后端抛 missing-permission，这里要说清原因，不能只是开关弹回去
+    el('muyuHint').textContent = String(e).includes('missing-permission')
+      ? '需要「辅助功能」权限才能计数，先点上面的「去授权」'
+      : '开启失败：' + e;
+  }
+});
+
+const muyuInterval = el('muyuInterval');
+let muyuIntervalTimer = null;
+muyuInterval.addEventListener('input', () => {
+  const v = +muyuInterval.value;
+  el('muyuIntervalVal').textContent = v + 'ms';
+  el('muyuIntervalNote').textContent = v + 'ms';
+  clearTimeout(muyuIntervalTimer);
+  muyuIntervalTimer = setTimeout(async () => {
+    setMuyuUi(await invoke('set_muyu', { intervalMs: v }));
+  }, 160);
+});
+
+const muyuVol = el('muyuVolume');
+let muyuVolTimer = null;
+muyuVol.addEventListener('input', () => {
+  const v = +muyuVol.value;
+  el('muyuVolVal').textContent = v + '%';
+  clearTimeout(muyuVolTimer);
+  muyuVolTimer = setTimeout(async () => {
+    setMuyuUi(await invoke('set_muyu', { volume: v / 100 }));
+  }, 180);
+});
+
+el('muyuTestBtn').addEventListener('click', () => invoke('preview_muyu').catch(() => {}));
+
+el('muyuWindowSwitch').addEventListener('click', async () => {
+  setMuyuUi(await invoke('set_muyu', { window: !(muyuState.window_visible !== false) }));
+});
+
+const muyuScale = el('muyuScale');
+let muyuScaleTimer = null;
+muyuScale.addEventListener('input', () => {
+  const v = +muyuScale.value;
+  el('muyuScaleVal').textContent = v + '%';
+  clearTimeout(muyuScaleTimer);
+  muyuScaleTimer = setTimeout(async () => {
+    setMuyuUi(await invoke('set_muyu', { scale: v / 100 }));
+  }, 160);
+});
+
+el('muyuMoveBtn').addEventListener('click', async () => {
+  const note = el('muyuMoveNote');
+  try {
+    await invoke('begin_muyu_drag');
+    note.textContent = '挂件已进入拖动模式，拖到想要的位置松手即可';
+    setTimeout(() => { note.textContent = '点一下挂件会变成可拖动，松手自动保存位置'; }, 16000);
+  } catch (e) {
+    note.textContent = '没法进入拖动模式：' + e;
+  }
+});
+
+el('muyuAssetsBtn').addEventListener('click', async () => {
+  try {
+    await invoke('open_muyu_assets_folder');
+  } catch (e) {
+    el('muyuAssetsNote').textContent = String(e);
+  }
+});
+
+el('muyuReloadBtn').addEventListener('click', async () => {
+  try {
+    await invoke('reload_muyu_assets');
+    const a = await invoke('get_muyu_assets');
+    const custom = [a.fish_custom && '木鱼', a.mallet_custom && '木槌'].filter(Boolean);
+    el('muyuAssetsNote').textContent = custom.length
+      ? '正在用自定义：' + custom.join('、')
+      : '正在用内置素材';
+  } catch (e) {
+    el('muyuAssetsNote').textContent = String(e);
+  }
+});
+
+el('muyuResetBtn').addEventListener('click', async () => {
+  setMuyuUi(await invoke('reset_muyu_today'));
+});
+
+listen('muyu-pending', (e) => {
+  const p = e.payload || {};
+  el('muyuPending').textContent = p.pending || 0;
+  if (typeof p.today === 'number') el('muyuToday').textContent = p.today.toLocaleString('zh-CN');
+});
 
 /* ---------- 音量 ---------- */
 const volume = el('volume');

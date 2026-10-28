@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>木鱼挂件 · 调参</title>
+<link rel="icon" href="data:," />
+<style>
+  :root {
+    --bg: #17100d;
+    --panel: #241a16;
+    --panel-2: #2c201a;
+    --line: rgba(255, 170, 110, .13);
+    --text: #f7eee7;
+    --muted: #a9907f;
+    --accent: #ff6b2c;
+    --accent-2: #ffb020;
+    --font: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 13px/1.6 var(--font);
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .wrap { display: flex; height: 100%; }
+
+  /* ---------- 左：预览 ---------- */
+  .left {
+    flex: none;
+    width: 460px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    border-right: 1px solid var(--line);
+    background: var(--panel);
+    overflow: auto;
+  }
+
+  .left h1 { font-size: 14px; font-weight: 500; }
+  .left .tip { font-size: 12px; color: var(--muted); }
+
+  .screen {
+    position: relative;
+    border-radius: 10px;
+    background: #0d0908;
+    border: 1px solid var(--line);
+    overflow: hidden;
+  }
+
+  .screen iframe {
+    display: block;
+    width: 240px;
+    height: 320px;
+    border: 0;
+    transform-origin: top left;
+    background: transparent;
+  }
+
+  .btns { display: flex; gap: 8px; }
+
+  button {
+    font: inherit;
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 7px 14px;
+    cursor: pointer;
+  }
+
+  button:hover { border-color: rgba(255, 170, 110, .35); }
+  button.primary { background: rgba(255, 107, 44, .14); border-color: rgba(255, 107, 44, .4); color: #ffc9a8; }
+
+  /* ---------- 右：控件 ---------- */
+  .right {
+    flex: 1;
+    min-width: 0;
+    padding: 16px 20px 20px;
+    overflow: auto;
+  }
+
+  .group { margin-bottom: 16px; }
+
+  .group h2 {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
+    letter-spacing: .08em;
+    margin-bottom: 6px;
+  }
+
+  .ctl {
+    display: grid;
+    grid-template-columns: 92px 1fr 58px;
+    align-items: center;
+    gap: 10px;
+    padding: 2px 0;
+  }
+
+  .ctl label { font-size: 12px; color: #d8c3b2; }
+
+  .ctl input[type=range] {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 170, 110, .18);
+    outline: none;
+  }
+
+  .ctl input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 13px; height: 13px;
+    border-radius: 50%;
+    background: var(--accent-2);
+    cursor: pointer;
+    box-shadow: 0 0 0 3px rgba(255, 107, 44, .14);
+  }
+
+  .ctl input[type=number] {
+    width: 100%;
+    font: inherit;
+    font-size: 12px;
+    text-align: right;
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    padding: 3px 6px;
+  }
+
+  .out {
+    margin-top: 18px;
+    border-top: 1px solid var(--line);
+    padding-top: 14px;
+  }
+
+  .out-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  #dump {
+    width: 100%;
+    height: 190px;
+    resize: vertical;
+    font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #ffd9a8;
+    background: #1b1310;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    padding: 10px;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="left">
+    <div>
+      <h1>木鱼挂件 · 调参</h1>
+      <div class="tip">拖动右侧滑块，左边实时生效。调好后点「复制参数」发给我。</div>
+    </div>
+
+    <div class="screen" id="screen">
+      <iframe id="frame" src="muyu.html?auto=0"></iframe>
+    </div>
+
+    <div class="btns">
+      <button class="primary" id="hit">敲一下</button>
+      <button id="reset">恢复默认</button>
+    </div>
+  </div>
+
+  <div class="right">
+    <div id="controls"></div>
+
+    <div class="out">
+      <div class="out-head">
+        <span>参数（复制这段发给我）</span>
+        <button id="copy">复制</button>
+      </div>
+      <textarea id="dump" readonly spellcheck="false"></textarea>
+    </div>
+  </div>
+</div>
+
+<script>
+const DEFAULTS = {
+  stageW: 239, stageH: 320,
+  fishLeft: 36, fishTop: 79, fishW: 172,
+  malletLeft: 84, malletTop: 18, malletW: 145,
+  tiltX: 0, perspective: 1600,
+  restDeg: -9, strikeDeg: -20,
+  rippleLeft: 98, rippleTop: 94,
+  popX: 46, popY: 205, popSize: 20, popRise: 58,
+  labelFont: 12, numFont: 32, counterBottom: 10,
+};
+
+const SPEC = [
+  { group: '舞台', items: [
+    { k: 'stageW', label: '宽', min: 200, max: 320, step: 1 },
+    { k: 'stageH', label: '高', min: 240, max: 420, step: 1 },
+  ]},
+  { group: '木鱼', items: [
+    { k: 'fishLeft', label: 'left', min: 0, max: 120, step: 1 },
+    { k: 'fishTop', label: 'top', min: 30, max: 180, step: 1 },
+    { k: 'fishW', label: '宽度', min: 120, max: 230, step: 1 },
+  ]},
+  { group: '木槌 · 位置', items: [
+    { k: 'malletLeft', label: 'left', min: 0, max: 180, step: 1 },
+    { k: 'malletTop', label: 'top', min: 0, max: 140, step: 1 },
+    { k: 'malletW', label: '宽度', min: 100, max: 230, step: 1 },
+  ]},
+  { group: '木槌 · 透视', items: [
+    { k: 'tiltX', label: '俯仰 rotateX', min: 0, max: 60, step: 1 },
+    { k: 'perspective', label: 'perspective', min: 300, max: 1600, step: 10 },
+  ]},
+  { group: '木槌 · 挥动', items: [
+    { k: 'restDeg', label: '静止角度', min: -50, max: 20, step: 1 },
+    { k: 'strikeDeg', label: '敲下角度', min: -70, max: 0, step: 1 },
+  ]},
+  { group: '涟漪', items: [
+    { k: 'rippleLeft', label: 'left', min: 20, max: 200, step: 1 },
+    { k: 'rippleTop', label: 'top', min: 20, max: 220, step: 1 },
+  ]},
+  { group: '+1 粒子', items: [
+    { k: 'popX', label: 'left', min: 0, max: 180, step: 1 },
+    { k: 'popY', label: 'bottom', min: 100, max: 320, step: 1 },
+    { k: 'popSize', label: '字号', min: 12, max: 34, step: 1 },
+    { k: 'popRise', label: '上浮距离', min: 20, max: 120, step: 1 },
+  ]},
+  { group: '今日功德', items: [
+    { k: 'labelFont', label: '标签字号', min: 9, max: 20, step: 1 },
+    { k: 'numFont', label: '数字字号', min: 18, max: 52, step: 1 },
+    { k: 'counterBottom', label: '距底部', min: 0, max: 50, step: 1 },
+  ]},
+];
+
+const P = { ...DEFAULTS };
+const frame = document.getElementById('frame');
+const screen = document.getElementById('screen');
+const dump = document.getElementById('dump');
+
+const SCALE = 1.5;
+
+/* ---------- 生成控件 ---------- */
+const box = document.getElementById('controls');
+for (const g of SPEC) {
+  const sec = document.createElement('div');
+  sec.className = 'group';
+  sec.innerHTML = `<h2>${g.group}</h2>`;
+  for (const it of g.items) {
+    const row = document.createElement('div');
+    row.className = 'ctl';
+    row.innerHTML = `
+      <label>${it.label}</label>
+      <input type="range" min="${it.min}" max="${it.max}" step="${it.step}" value="${P[it.k]}">
+      <input type="number" min="${it.min}" max="${it.max}" step="${it.step}" value="${P[it.k]}">`;
+    const [range, num] = row.querySelectorAll('input');
+    const set = (v) => {
+      v = Math.min(it.max, Math.max(it.min, Number(v)));
+      P[it.k] = v;
+      range.value = v;
+      num.value = v;
+      apply();
+    };
+    range.addEventListener('input', (e) => set(e.target.value));
+    num.addEventListener('change', (e) => set(e.target.value));
+    sec.appendChild(row);
+  }
+  box.appendChild(sec);
+}
+
+/* ---------- 应用 ---------- */
+function apply() {
+  const d = frame.contentDocument;
+  if (!d) return;
+
+  const stage = d.getElementById('stage');
+  stage.style.width = P.stageW + 'px';
+  stage.style.height = P.stageH + 'px';
+
+  const fish = d.getElementById('fish');
+  fish.style.left = P.fishLeft + 'px';
+  fish.style.top = P.fishTop + 'px';
+  fish.style.width = P.fishW + 'px';
+
+  const arm = d.getElementById('mallet-arm');
+  arm.style.left = P.malletLeft + 'px';
+  arm.style.top = P.malletTop + 'px';
+  arm.style.width = P.malletW + 'px';
+  arm.style.height = (P.malletW * 0.365) + 'px';
+  arm.style.perspective = P.perspective + 'px';
+
+  d.getElementById('mallet-tilt').style.transform = `rotateX(${P.tiltX}deg)`;
+
+  const mallet = d.getElementById('mallet');
+  mallet.style.animation = 'none';
+  mallet.style.transform = `rotate(${P.restDeg}deg)`;
+
+  const ripple = d.getElementById('ripple');
+  ripple.style.left = P.rippleLeft + 'px';
+  ripple.style.top = P.rippleTop + 'px';
+
+  const counter = d.getElementById('counter');
+  counter.style.bottom = P.counterBottom + 'px';
+  d.querySelector('#counter .k').style.fontSize = P.labelFont + 'px';
+  d.getElementById('num').style.fontSize = P.numFont + 'px';
+
+  d.documentElement.style.setProperty('--pop-x', P.popX);
+  d.documentElement.style.setProperty('--pop-y', P.popY);
+  d.documentElement.style.setProperty('--pop-size', P.popSize + 'px');
+  d.documentElement.style.setProperty('--pop-rise', P.popRise);
+
+  frame.style.width = P.stageW + 'px';
+  frame.style.height = P.stageH + 'px';
+  frame.style.transform = `scale(${SCALE})`;
+  screen.style.width = Math.round(P.stageW * SCALE) + 'px';
+  screen.style.height = Math.round(P.stageH * SCALE) + 'px';
+
+  dump.value = JSON.stringify(P, null, 2);
+}
+
+/* ---------- 敲一下 ---------- */
+document.getElementById('hit').addEventListener('click', () => {
+  const w = frame.contentWindow;
+  if (!w || !w.__muyu) return;
+  w.__muyu.strike(1);
+
+  // 让挥槌真的走到敲下角度，看一眼落点对不对
+  const d = frame.contentDocument;
+  const m = d.getElementById('mallet');
+  m.style.animation = 'none';
+  m.style.transition = 'transform 90ms ease-in';
+  m.style.transform = `rotate(${P.strikeDeg}deg)`;
+  setTimeout(() => {
+    m.style.transition = 'transform 200ms ease-out';
+    m.style.transform = `rotate(${P.restDeg}deg)`;
+  }, 160);
+});
+
+/* ---------- 恢复默认 ---------- */
+document.getElementById('reset').addEventListener('click', () => {
+  Object.assign(P, DEFAULTS);
+  document.querySelectorAll('.ctl').forEach((row, i) => {
+    const it = SPEC.flatMap(g => g.items)[i];
+    if (!it) return;
+    const [range, num] = row.querySelectorAll('input');
+    range.value = P[it.k];
+    num.value = P[it.k];
+  });
+  apply();
+});
+
+/* ---------- 复制 ---------- */
+document.getElementById('copy').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(dump.value);
+    const btn = document.getElementById('copy');
+    btn.textContent = '已复制';
+    setTimeout(() => (btn.textContent = '复制'), 1200);
+  } catch (e) {
+    dump.select();
+    document.execCommand('copy');
+  }
+});
+
+frame.addEventListener('load', () => {
+  const d = frame.contentDocument;
+  if (d) {
+    const hint = d.getElementById('hint');
+    if (hint) hint.style.display = 'none';
+    d.body.style.background = '#0d0908';
+  }
+  apply();
+});
+</script>
+</body>
+</html>

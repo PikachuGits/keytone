@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<title>木鱼</title>
+<link rel="icon" href="data:," />
+<style>
+  :root {
+    --beat: 170ms;
+    /* 下面这几个给调参页实时改，改完再写回这里 */
+    --pop-x: 46;
+    --pop-y: 205;
+    --pop-rise: 58;
+    --pop-size: 20px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: transparent;
+    overflow: hidden;
+    -webkit-user-select: none; user-select: none;
+  }
+
+  #stage {
+    position: relative;
+    width: 239px; height: 320px;
+    /* 窗口被整体缩放时，舞台跟着等比放大，内部坐标不用改 */
+    transform: scale(var(--ui-scale, 1));
+    transform-origin: top left;
+  }
+
+  /* 调整位置模式：临时恢复鼠标事件，整块区域可拖 */
+  body.dragging #stage {
+    outline: 1px dashed rgba(255, 196, 107, .55);
+    outline-offset: -8px;
+    border-radius: 12px;
+    cursor: grab;
+  }
+
+  #dragHint {
+    position: absolute;
+    left: 0; right: 0; bottom: 6px;
+    text-align: center;
+    font: 400 10px/1.6 -apple-system, "PingFang SC", sans-serif;
+    color: #ffc46b;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, .8);
+    opacity: 0;
+    transition: opacity .2s;
+    pointer-events: none;
+  }
+
+  body.dragging #dragHint { opacity: .95; }
+
+  /* ---------- 木鱼 ---------- */
+  #fish-wrap {
+    position: absolute; inset: 0;
+    transform-origin: 50% 78%;
+    will-change: transform;
+  }
+
+  #fish {
+    position: absolute;
+    left: 36px; top: 79px;
+    width: 172px; height: auto;
+    transform-origin: 50% 88%;
+    will-change: transform;
+    filter: drop-shadow(0 6px 10px rgba(0, 0, 0, .35));
+    animation: breathe 4s ease-in-out infinite;
+  }
+
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(1.015); }
+  }
+
+  /* ---------- 木槌 ---------- */
+  /* 木鱼是从斜上方俯视拍的，木槌原图是纯侧视。
+     套一层 rotateX 把槌子压扁一点，让它落在和木鱼同一个俯视平面上。 */
+  #mallet-arm {
+    position: absolute;
+    left: 84px; top: 18px;
+    width: 145px; height: 53px;
+    perspective: 1600px;
+    perspective-origin: 100% 50%;
+  }
+
+  #mallet {
+    width: 100%; height: auto;
+    /* 支点在手柄末端（右端），所以转一点，槌头就摆很大一段弧 */
+    transform-origin: 100% 50%;
+    transform: rotate(-9deg);
+    will-change: transform;
+    filter: drop-shadow(0 4px 8px rgba(0, 0, 0, .3));
+  }
+
+  #mallet-tilt {
+    width: 100%; height: 100%;
+    transform: rotateX(0deg);
+    transform-origin: 100% 50%;
+  }
+
+  /* ---------- 涟漪 ---------- */
+  #ripple {
+    position: absolute;
+    left: 98px; top: 94px;
+    width: 44px; height: 18px;
+    margin: -9px 0 0 -22px;
+    border: 1.5px solid rgba(255, 196, 107, .55);
+    border-radius: 50%;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  /* ---------- 功德 +1 ---------- */
+  .pop {
+    position: absolute;
+    left: calc(var(--pop-x) * 1px);
+    bottom: calc(var(--pop-y) * 1px);
+    font: 500 var(--pop-size, 20px)/1 -apple-system, "PingFang SC", sans-serif;
+    color: #ffc46b;
+    text-shadow: 0 1px 4px rgba(0, 0, 0, .6), 0 0 3px rgba(0, 0, 0, .5);
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    --x1: 0px;
+    --y1: -54px;
+  }
+
+  /* ---------- 计数 ---------- */
+  #counter {
+    position: absolute;
+    left: 0; right: 0; bottom: 10px;
+    text-align: center;
+    font-family: -apple-system, "PingFang SC", sans-serif;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .85), 0 0 6px rgba(0, 0, 0, .55), 0 0 14px rgba(0, 0, 0, .35);
+    isolation: isolate;
+  }
+
+  /* 桌面底色不可控，垫一层柔和暗角，浅色壁纸下也读得清 */
+  #counter::before {
+    content: "";
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 226px; height: 116px;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(ellipse at center,
+      rgba(22, 13, 9, .26) 0%,
+      rgba(22, 13, 9, .13) 44%,
+      rgba(22, 13, 9, 0) 72%);
+    z-index: -1;
+    pointer-events: none;
+  }
+
+  #counter .k {
+    display: block;
+    font-size: 12px;
+    letter-spacing: .12em;
+    color: #efdfd2;
+    opacity: .95;
+  }
+
+  #num {
+    display: block;
+    margin-top: 3px;
+    font-size: 32px;
+    font-weight: 500;
+    color: #f7eee7;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .02em;
+    will-change: transform;
+  }
+
+  #pend {
+    display: block;
+    height: 14px;
+    margin-top: 2px;
+    font-size: 11px;
+    color: #ffc46b;
+    opacity: 0;
+    transition: opacity .12s;
+  }
+
+  #pend.on { opacity: .85; }
+
+  #hint {
+    position: absolute;
+    left: 0; right: 0; top: 12px;
+    text-align: center;
+    font: 400 11px/1.6 -apple-system, "PingFang SC", sans-serif;
+    color: #efdfd2;
+    opacity: .55;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .8);
+    transition: opacity .3s;
+  }
+
+  #hint.off { opacity: 0; }
+
+  /* ---------- 命中动画 ---------- */
+  .striking #mallet { animation: swing 340ms cubic-bezier(.3, .8, .4, 1); }
+
+  @keyframes swing {
+    0%   { transform: rotate(-9deg); }
+    18%  { transform: rotate(-20deg); }
+    34%  { transform: rotate(-18deg); }
+    100% { transform: rotate(-9deg); }
+  }
+
+  .striking #fish-wrap { animation: squish 260ms cubic-bezier(.2, .9, .3, 1); }
+
+  @keyframes squish {
+    0%   { transform: scale(1, 1); }
+    16%  { transform: scale(1.05, .94); }
+    52%  { transform: scale(.99, 1.02); }
+    100% { transform: scale(1, 1); }
+  }
+
+  .striking #ripple { animation: ripple 420ms ease-out; }
+
+  @keyframes ripple {
+    0%   { transform: scale(.7); opacity: .5; }
+    100% { transform: scale(1.9); opacity: 0; }
+  }
+
+  .pop.run { animation: rise 460ms cubic-bezier(.2, .7, .4, 1) forwards; }
+
+  @keyframes rise {
+    0%   { transform: translate(-50%, 0) scale(.75); opacity: 0; }
+    12%  { transform: translate(calc(-50% + var(--x1) * .3), -10px) scale(1.1); opacity: 1; }
+    100% { transform: translate(calc(-50% + var(--x1)), var(--y1)) scale(1); opacity: 0; }
+  }
+
+  #num.bump { animation: bump 200ms cubic-bezier(.3, 1.4, .5, 1); }
+
+  @keyframes bump {
+    0%   { transform: scale(1); }
+    35%  { transform: scale(1.12); }
+    100% { transform: scale(1); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #fish { animation: none; }
+    .pop.run { animation: none; opacity: 0; }
+    .striking #fish-wrap, .striking #ripple { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="fish-wrap"><img id="fish" src="muyu-fish.png" alt="" /></div>
+  <div id="mallet-arm"><div id="mallet-tilt"><img id="mallet" src="muyu-mallet.png" alt="" /></div></div>
+  <div id="ripple"></div>
+  <div id="pops"></div>
+  <div id="hint">点击试听</div>
+  <div id="dragHint">拖动我 · 松手保存</div>
+
+  <div id="counter">
+    <span class="k">今日功德</span>
+    <span id="num">0</span>
+    <span id="pend"></span>
+  </div>
+</div>
+
+<script>
+(() => {
+  const stage = document.getElementById('stage');
+  const num = document.getElementById('num');
+  const pend = document.getElementById('pend');
+  const hint = document.getElementById('hint');
+  const popsBox = document.getElementById('pops');
+
+  const TAURI = window.__TAURI__;
+  const LIVE = !!(TAURI && TAURI.event);
+
+  let today = 0;
+  let pending = 0;
+
+  /* 粒子池：170ms 一拍、560ms 生命周期，峰值 3–4 个，留 6 个 */
+  const POOL = 6;
+  const pops = [];
+  for (let i = 0; i < POOL; i++) {
+    const el = document.createElement('div');
+    el.className = 'pop';
+    el.textContent = '+1';
+    popsBox.appendChild(el);
+    pops.push({ el, busy: false, at: 0, timer: 0 });
+  }
+
+  function spawnPop(delta) {
+    let slot = pops.find(p => !p.busy);
+    if (!slot) slot = pops.reduce((a, b) => (a.at <= b.at ? a : b));
+
+    slot.busy = true;
+    slot.at = performance.now();
+
+    const el = slot.el;
+    el.textContent = delta > 1 ? '+' + delta : '+1';
+    /* 每个粒子走各自的斜线，避免连击时叠成一坨 */
+    const cs = getComputedStyle(document.documentElement);
+    const bx = parseFloat(cs.getPropertyValue('--pop-x')) || 46;
+    const by = parseFloat(cs.getPropertyValue('--pop-y')) || 205;
+    const rise = parseFloat(cs.getPropertyValue('--pop-rise')) || 58;
+    el.style.setProperty('--x1', (Math.random() * 26 - 30).toFixed(0) + 'px');
+    el.style.setProperty('--y1', (-rise - Math.random() * 18).toFixed(0) + 'px');
+    el.style.left = (bx + Math.random() * 22 - 11).toFixed(0) + 'px';
+    el.style.bottom = (by - 7 + Math.random() * 14).toFixed(0) + 'px';
+
+    el.classList.remove('run');
+    void el.offsetWidth;
+    el.classList.add('run');
+
+    clearTimeout(slot.timer);
+    slot.timer = setTimeout(() => { slot.busy = false; }, 480);
+  }
+
+  let bumpTimer = 0;
+  function renderCount() {
+    num.textContent = today.toLocaleString('zh-CN');
+    num.classList.remove('bump');
+    void num.offsetWidth;
+    num.classList.add('bump');
+    clearTimeout(bumpTimer);
+    bumpTimer = setTimeout(() => num.classList.remove('bump'), 220);
+  }
+
+  function renderPending() {
+    pend.textContent = pending > 0 ? '待敲 ' + pending : '';
+    pend.classList.toggle('on', pending > 0);
+  }
+
+  function strike(delta, newToday, newPending) {
+    stage.classList.remove('striking');
+    void stage.offsetWidth;
+    stage.classList.add('striking');
+
+    spawnPop(delta);
+
+    if (typeof newToday === 'number') today = newToday;
+    else today += delta;
+    if (typeof newPending === 'number') pending = newPending;
+
+    renderCount();
+    renderPending();
+  }
+
+  /* 窗口被整体缩放时，舞台等比放大，内部坐标不用改 */
+  function fitScale() {
+    document.documentElement.style.setProperty('--ui-scale', String(window.innerWidth / 240));
+  }
+  window.addEventListener('resize', fitScale);
+  fitScale();
+
+  /* ---------- Tauri：声音由 Rust 播放，这里只负责动画 ---------- */
+  if (LIVE) {
+    TAURI.event.listen('muyu-hit', (e) => {
+      const p = e.payload || {};
+      strike(p.delta || 1, p.today, p.pending);
+    });
+    TAURI.event.listen('muyu-reset', () => {
+      today = 0; pending = 0; renderCount(); renderPending();
+    });
+    TAURI.event.listen('muyu-pending', (e) => {
+      pending = (e.payload || {}).pending || 0;
+      renderPending();
+    });
+    TAURI.core.invoke('get_muyu').then((s) => {
+      if (!s) return;
+      today = s.today || 0;
+      pending = s.pending || 0;
+      /* 挥槌周期跟着节拍走，换档位时动画才不会拖尾或抢拍 */
+      if (s.interval_ms) {
+        document.documentElement.style.setProperty('--beat', s.interval_ms + 'ms');
+      }
+      renderCount();
+      renderPending();
+    }).catch(() => {});
+    hint.remove();
+
+    const stageEl = document.getElementById('stage');
+    const win = TAURI.window.getCurrentWindow();
+    // 全局 API 里 window 模块自带 PhysicalPosition，dpi 模块也有一份，取到哪个用哪个
+    const PhysicalPosition =
+      (TAURI.window && TAURI.window.PhysicalPosition) ||
+      (TAURI.dpi && TAURI.dpi.PhysicalPosition);
+
+    /* 素材：优先用数据目录 muyu/ 下用户替换的图，没有才用内置的 */
+    const fishEl = document.getElementById('fish');
+    const malletEl = document.getElementById('mallet');
+
+    async function loadAssets() {
+      try {
+        const a = await TAURI.core.invoke('get_muyu_assets');
+        if (a && a.fish) fishEl.src = a.fish;
+        if (a && a.mallet) malletEl.src = a.mallet;
+      } catch (e) {
+        /* 读不到就用打包进来的图 */
+      }
+    }
+    loadAssets();
+    TAURI.event.listen('muyu-assets', loadAssets);
+
+    /* 调整位置。
+       不能用 data-tauri-drag-region：无边框窗口的 canBecomeKeyWindow 是 false，
+       原生拖拽起不来。改成自己算坐标调 setPosition。 */
+    let drag = null;
+    let target = null;
+    let raf = 0;
+
+    function applyMove() {
+      raf = 0;
+      if (!drag || !target) return;
+      win
+        .setPosition(new PhysicalPosition(Math.round(target.x), Math.round(target.y)))
+        .catch(() => {});
+    }
+
+    stageEl.addEventListener('pointerdown', async (e) => {
+      if (!document.body.classList.contains('dragging')) return;
+      e.preventDefault();
+      try {
+        const [scale, pos] = await Promise.all([win.scaleFactor(), win.outerPosition()]);
+        drag = { x: pos.x, y: pos.y, sx: e.screenX, sy: e.screenY, scale };
+      } catch (err) {
+        drag = null;
+        return;
+      }
+      // 指针捕获是加分项，失败不能把整个拖动废掉
+      try {
+        stageEl.setPointerCapture(e.pointerId);
+      } catch (err) {}
+    });
+
+    stageEl.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      target = {
+        x: drag.x + (e.screenX - drag.sx) * drag.scale,
+        y: drag.y + (e.screenY - drag.sy) * drag.scale,
+      };
+      if (!raf) raf = requestAnimationFrame(applyMove);
+    });
+
+    function endDrag() {
+      if (!drag) return;
+      drag = null;
+      target = null;
+      if (raf) {
+        cancelAnimationFrame(raf);
+        raf = 0;
+      }
+      TAURI.core.invoke('end_muyu_drag').catch(() => {});
+    }
+    stageEl.addEventListener('pointerup', endDrag);
+    stageEl.addEventListener('pointercancel', endDrag);
+
+    TAURI.event.listen('muyu-drag', (e) => {
+      const on = !!(e.payload || {}).on;
+      document.body.classList.toggle('dragging', on);
+      if (!on) {
+        drag = null;
+        target = null;
+      }
+    });
+
+    return;
+  }
+
+  /* ---------- 浏览器预览：本地节拍器模拟 ---------- */
+  const BEAT = 500;
+  const CAP = 12;
+  let queue = 0;
+
+  const audio = { ctx: null, buf: null };
+
+  async function ensureAudio() {
+    if (audio.ctx) return;
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    audio.ctx = ctx;
+    try {
+      const res = await fetch('muyu.wav');
+      audio.buf = await ctx.decodeAudioData(await res.arrayBuffer());
+    } catch (e) {
+      console.warn('音频加载失败', e);
+    }
+  }
+
+  function knockSound() {
+    const { ctx, buf } = audio;
+    if (!ctx || !buf) return;
+    if (ctx.state === 'suspended') ctx.resume();
+    const src = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    gain.gain.value = 0.85;
+    src.buffer = buf;
+    src.connect(gain).connect(ctx.destination);
+    src.start();
+  }
+
+  document.addEventListener('pointerdown', () => {
+    ensureAudio();
+    hint.classList.add('off');
+    queue += 5;                 // 点一下攒 5 下
+    renderPending();
+  });
+
+  setTimeout(() => hint.classList.add('off'), 6000);
+
+  setInterval(() => {
+    if (queue === 0) return;
+    let n = 1;
+    if (queue > CAP) n = queue - CAP + 1;
+    queue -= n;
+    pending = queue;
+    strike(n);
+    knockSound();
+  }, BEAT);
+
+  /* 自动演示：不定时来一串按键，验证「输入随机、敲击等距」 */
+  function burst() {
+    const keys = 2 + Math.floor(Math.random() * 7);
+    let i = 0;
+    const tick = () => {
+      if (i++ >= keys) { setTimeout(burst, 1200 + Math.random() * 1400); return; }
+      queue += 1;
+      pending = queue;
+      renderPending();
+      setTimeout(tick, 70 + Math.random() * 150);
+    };
+    tick();
+  }
+
+  renderCount();
+  renderPending();
+  ensureAudio();
+
+  if (!location.search.includes('auto=0')) {
+    setTimeout(() => { hint.classList.add('off'); burst(); }, 600);
+  }
+
+  /* 调试/截图钩子 */
+  window.__muyu = {
+    strike: (d = 1) => { strike(d); knockSound(); },
+    freeze: (ms) => {
+      document.getAnimations().forEach(a => { a.pause(); a.currentTime = ms; });
+    },
+    setBg: (c) => { document.body.style.background = c; },
+    audio: () => ({
+      state: audio.ctx && audio.ctx.state,
+      decoded: !!audio.buf,
+      secs: audio.buf && +audio.buf.duration.toFixed(3),
+    }),
+  };
+})();
+</script>
+</body>
+</html>

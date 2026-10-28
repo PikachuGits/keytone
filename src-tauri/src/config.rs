@@ -27,6 +27,28 @@ pub struct Settings {
     /// 菜单栏图标：gold / mono
     #[serde(default = "default_tray")]
     pub tray_style: String,
+    /// 木鱼开关（独立于按键音）
+    #[serde(default)]
+    pub muyu_enabled: bool,
+    /// 木鱼出声
+    #[serde(default = "default_true")]
+    pub muyu_sound: bool,
+    #[serde(default = "default_muyu_volume")]
+    pub muyu_volume: f32,
+    /// 敲击间隔（毫秒），默认 500
+    #[serde(default = "default_muyu_interval")]
+    pub muyu_interval_ms: u64,
+    /// 是否显示桌面挂件（关掉只计数不显示）
+    #[serde(default = "default_true")]
+    pub muyu_window: bool,
+    /// 挂件整体缩放 0.7–1.5
+    #[serde(default = "default_muyu_scale")]
+    pub muyu_scale: f32,
+    /// 挂件位置（物理像素），None 表示贴右下角
+    #[serde(default)]
+    pub muyu_x: Option<i32>,
+    #[serde(default)]
+    pub muyu_y: Option<i32>,
 }
 
 fn default_volume() -> f32 {
@@ -49,6 +71,18 @@ fn default_tray() -> String {
     "mono".into()
 }
 
+fn default_muyu_volume() -> f32 {
+    0.85
+}
+
+fn default_muyu_interval() -> u64 {
+    500
+}
+
+fn default_muyu_scale() -> f32 {
+    1.0
+}
+
 /// 默认更新源。留空会让「检查更新」永远提示未配置，所以内置官方仓库。
 fn default_update_repo() -> String {
     "PikachuGits/keytone".into()
@@ -66,6 +100,14 @@ impl Default for Settings {
             update_repo: default_update_repo(),
             theme: default_theme(),
             tray_style: default_tray(),
+            muyu_enabled: false,
+            muyu_sound: default_true(),
+            muyu_volume: default_muyu_volume(),
+            muyu_interval_ms: default_muyu_interval(),
+            muyu_window: default_true(),
+            muyu_scale: default_muyu_scale(),
+            muyu_x: None,
+            muyu_y: None,
         }
     }
 }

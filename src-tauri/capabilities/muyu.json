@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "muyu",
+  "description": "木鱼挂件窗口：监听 muyu-hit / muyu-pending / muyu-drag / muyu-assets 事件，读取功德与素材，以及在「调整位置」模式下自己算坐标移动窗口。",
+  "windows": ["muyu"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-outer-position",
+    "core:window:allow-set-position",
+    "core:window:allow-scale-factor"
+  ]
+}

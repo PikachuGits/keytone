@@ -1,13 +1,14 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "KeyTone",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "identifier": "com.keytone.app",
   "build": {
     "frontendDist": "../dist"
   },
   "app": {
     "withGlobalTauri": true,
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "KeyTone",
@@ -38,7 +39,7 @@
     "copyright": "Copyright © 2026 PikachuGits",
     "macOS": {
       "minimumSystemVersion": "11.0",
-      "signingIdentity": "-"
+      "signingIdentity": "KeyTone Local Signing"
     }
   }
 }
