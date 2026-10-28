@@ -34,11 +34,12 @@ jobs:
       - name: 安装 Tauri CLI
         run: npm install
 
-      # tauri.conf.json 里配了 bundle.macOS.signingIdentity = "-"，
-      # 让 Tauri 打包时对整个 .app 做 ad-hoc 签名。
-      # 不签的话 TCC 无法把辅助功能授权绑定到 app，
-      # 用户会遇到「勾选了却一直显示未授权」。
+      # 本地开发用的是自签名证书（KeyTone Local Signing），这样重打包不会掉
+      # 辅助功能授权；CI 上没有这张证书，用 APPLE_SIGNING_IDENTITY 覆盖回 ad-hoc。
+      # 不签的话 TCC 无法把授权绑定到 app，用户会遇到「勾选了却一直显示未授权」。
       - name: 构建通用包
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
         run: npm run tauri build -- --target universal-apple-darwin
 
       - name: 校验签名（未签名直接失败，不发布）
