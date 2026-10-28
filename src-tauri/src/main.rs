@@ -356,7 +356,40 @@ fn set_update_repo(state: State<'_, AppState>, repo: String) -> String {
     repo
 }
 
-/// 检查更新。用 curl 而不是引 reqwest —— 少一个重依赖，macOS 自带 curl。
+/// 在文件管理器里打开一个目录。三个平台各有各的命令。
+fn open_folder(dir: &std::path::Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    const CMD: &str = "explorer";
+    #[cfg(target_os = "macos")]
+    const CMD: &str = "open";
+    #[cfg(all(unix, not(target_os = "macos")))]
+    const CMD: &str = "xdg-open";
+
+    std::process::Command::new(CMD)
+        .arg(dir)
+        .spawn()
+        .map_err(|e| format!("打开目录失败: {e}"))?;
+    Ok(())
+}
+
+/// 构造 curl 命令。
+///
+/// Windows 上必须带 `CREATE_NO_WINDOW`，否则每次检查更新都会闪一个黑框；
+/// 另外把「curl 不存在」和「网络失败」区分开，不然用户只看到一句「网络请求失败」，
+/// 没法判断是自己没网还是系统里没有 curl。
+fn curl() -> std::process::Command {
+    #[allow(unused_mut)]
+    let mut cmd = std::process::Command::new("curl");
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
+/// 检查更新。用 curl 而不是引 reqwest —— 少一个重依赖，macOS / Windows 都自带。
 #[tauri::command]
 fn check_update(state: State<'_, AppState>) -> UpdateInfo {
     let repo = state.update_repo.lock().unwrap().clone();
@@ -374,14 +407,14 @@ fn check_update(state: State<'_, AppState>) -> UpdateInfo {
     }
 
     let api = format!("https://api.github.com/repos/{repo}/releases/latest");
-    let output = std::process::Command::new("curl")
+    let output = curl()
         .args(["-sL", "--max-time", "8", "-H", "User-Agent: keytone"])
         .arg(&api)
         .output();
 
     let body = match output {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).to_string(),
-        _ => {
+        Ok(out) => {
             return UpdateInfo {
                 current: APP_VERSION,
                 latest: None,
@@ -389,7 +422,21 @@ fn check_update(state: State<'_, AppState>) -> UpdateInfo {
                 url: None,
                 asset_url: None,
                 asset_name: None,
-                error: Some("网络请求失败".into()),
+                error: Some(format!(
+                    "网络请求失败（curl 退出码 {:?}）",
+                    out.status.code()
+                )),
+            }
+        }
+        Err(e) => {
+            return UpdateInfo {
+                current: APP_VERSION,
+                latest: None,
+                has_update: false,
+                url: None,
+                asset_url: None,
+                asset_name: None,
+                error: Some(format!("无法执行 curl：{e}")),
             }
         }
     };
@@ -537,7 +584,7 @@ async fn download_update(
     let app_task = app.clone();
 
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
-        let mut child = std::process::Command::new("curl")
+        let mut child = curl()
             .args(["-sL", "--fail", "--max-time", "600", "-H", "User-Agent: keytone", "-o"])
             .arg(&dest_task)
             .arg(&url)
@@ -577,7 +624,7 @@ async fn download_update(
 
 /// 取远端文件大小，用来算下载百分比。拿不到就返回 None，界面显示已下载字节数。
 fn remote_size(url: &str) -> Option<u64> {
-    let out = std::process::Command::new("curl")
+    let out = curl()
         .args(["-sIL", "--max-time", "8", "-H", "User-Agent: keytone", url])
         .output()
         .ok()?;
@@ -756,7 +803,7 @@ fn open_accessibility_settings() {
 
 #[tauri::command]
 fn open_profiles_folder(state: State<'_, AppState>) {
-    let _ = std::process::Command::new("open").arg(&state.profiles_dir).spawn();
+    let _ = open_folder(&state.profiles_dir);
 }
 
 /// 试听当前音色包。直接走音频线程，不经过全局钩子，
@@ -993,7 +1040,10 @@ fn apply_muyu_inner(app: &tauri::AppHandle, enabled: bool) -> Result<bool, Strin
 
     ensure_hook(app)?;
     state.muyu.set_enabled(true);
-    sync_muyu_window(app)?;
+    // 窗口建不出来不应该连带把开关也回滚 —— 计数和声音照样能用
+    if let Err(e) = sync_muyu_window(app) {
+        eprintln!("[muyu] 挂件窗口创建失败（计数不受影响）: {e}");
+    }
     state.sync_muyu_tray(true);
     state.persist();
     let _ = app.emit("muyu-state", serde_json::json!({ "enabled": true }));
@@ -1448,11 +1498,7 @@ fn get_muyu_assets(app: tauri::AppHandle) -> MuyuAssets {
 fn open_muyu_assets_folder(app: tauri::AppHandle) -> Result<(), String> {
     let dir = muyu_asset_dir(&app).ok_or("找不到数据目录")?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("创建素材目录失败: {e}"))?;
-    std::process::Command::new("open")
-        .arg(&dir)
-        .spawn()
-        .map_err(|e| format!("打开目录失败: {e}"))?;
-    Ok(())
+    open_folder(&dir)
 }
 
 /// 用户换完图点「重新加载」：通知挂件重新取一次素材。
@@ -2064,10 +2110,21 @@ fn main() {
                 }
             }
 
+            // 挂件窗口不能在 setup 里同步创建。
+            // Windows 上 WebView2 在这个阶段建窗口会把主线程卡死 ——
+            // 主窗口是 setup 之前就建好的所以还看得见，但事件循环永远起不来，
+            // 结果就是界面所有按钮都没反应。挪到事件循环跑起来之后再建。
             if was_muyu {
-                if let Err(e) = apply_muyu(app.handle(), true) {
-                    eprintln!("[muyu] 恢复木鱼失败: {e}");
-                }
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(400));
+                    let inner = handle.clone();
+                    let _ = handle.run_on_main_thread(move || {
+                        if let Err(e) = apply_muyu(&inner, true) {
+                            eprintln!("[muyu] 恢复木鱼失败: {e}");
+                        }
+                    });
+                });
             }
 
             Ok(())

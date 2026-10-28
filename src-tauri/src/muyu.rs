@@ -253,8 +253,14 @@ impl Muyu {
         };
 
         let tmp = self.path.with_extension("json.tmp");
-        if fs::write(&tmp, text).is_ok() && fs::rename(&tmp, &self.path).is_err() {
-            let _ = fs::remove_file(&tmp);
+        if fs::write(&tmp, text).is_err() {
+            return;
+        }
+        // Windows 的 rename 不能覆盖已存在的文件，必须先删目标再改名，
+        // 否则功德永远写不进去（第一次之后每次都失败）。
+        if fs::rename(&tmp, &self.path).is_err() {
+            let _ = fs::remove_file(&self.path);
+            let _ = fs::rename(&tmp, &self.path);
         }
     }
 
