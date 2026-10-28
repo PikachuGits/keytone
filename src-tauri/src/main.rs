@@ -350,10 +350,52 @@ fn apply_window_theme(app: &tauri::AppHandle, theme: &str) {
 
 #[tauri::command]
 fn set_update_repo(state: State<'_, AppState>, repo: String) -> String {
-    let repo = repo.trim().to_string();
+    let repo = normalize_repo(&repo);
     *state.update_repo.lock().unwrap() = repo.clone();
     state.persist();
     repo
+}
+
+/// 把用户填的各种写法统一成 `owner/repo`。
+///
+/// 支持这几种（都是 GitHub 上「复制链接」能拿到的东西）：
+///
+/// ```text
+/// owner/repo
+/// https://github.com/owner/repo
+/// https://github.com/owner/repo.git
+/// git@github.com:owner/repo.git
+/// ```
+///
+/// 之前只认第一种，用户粘完整地址就会拼成
+/// `api.github.com/repos/https://github.com/owner/repo/...`，GitHub 直接回 Not Found。
+fn normalize_repo(input: &str) -> String {
+    let mut s = input.trim().trim_end_matches('/').to_string();
+
+    if let Some(rest) = s.strip_prefix("git@github.com:") {
+        s = rest.to_string();
+    }
+    for prefix in ["https://", "http://"] {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            s = rest.to_string();
+        }
+    }
+    for prefix in ["www.github.com/", "github.com/"] {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            s = rest.to_string();
+        }
+    }
+    if let Some(rest) = s.strip_suffix(".git") {
+        s = rest.to_string();
+    }
+
+    // 只保留前两段，后面的 /releases、/tree/main 之类一律丢掉
+    let parts: Vec<&str> = s.split('/').filter(|p| !p.is_empty()).collect();
+    if parts.len() >= 2 {
+        format!("{}/{}", parts[0], parts[1])
+    } else {
+        s
+    }
 }
 
 /// 在文件管理器里打开一个目录。三个平台各有各的命令。
@@ -392,7 +434,7 @@ fn curl() -> std::process::Command {
 /// 检查更新。用 curl 而不是引 reqwest —— 少一个重依赖，macOS / Windows 都自带。
 #[tauri::command]
 fn check_update(state: State<'_, AppState>) -> UpdateInfo {
-    let repo = state.update_repo.lock().unwrap().clone();
+    let repo = normalize_repo(&state.update_repo.lock().unwrap().clone());
 
     if repo.trim().is_empty() {
         return UpdateInfo {
@@ -462,10 +504,16 @@ fn check_update(state: State<'_, AppState>) -> UpdateInfo {
         .map(|s| s.trim_start_matches('v').to_string());
 
     let Some(tag) = tag else {
-        let msg = json
+        let raw = json
             .get("message")
             .and_then(|v| v.as_str())
             .unwrap_or("没有找到发布版本");
+        // GitHub 对不存在的仓库只回一句 "Not Found"，对着它没法排查
+        let msg = if raw.eq_ignore_ascii_case("not found") {
+            format!("找不到仓库 {repo}，或它还没有发布过 Release")
+        } else {
+            raw.to_string()
+        };
         return UpdateInfo {
             current: APP_VERSION,
             latest: None,
@@ -473,7 +521,7 @@ fn check_update(state: State<'_, AppState>) -> UpdateInfo {
             url: None,
             asset_url: None,
             asset_name: None,
-            error: Some(msg.to_string()),
+            error: Some(msg),
         };
     };
 
@@ -2308,4 +2356,32 @@ fn muyu_selftest() -> Result<(), String> {
     std::thread::sleep(Duration::from_millis(300));
     println!("muyu selftest ok");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_repo;
+
+    #[test]
+    fn repo_accepts_every_paste_shape() {
+        let cases = [
+            ("PikachuGits/keytone", "PikachuGits/keytone"),
+            ("  PikachuGits/keytone  ", "PikachuGits/keytone"),
+            ("https://github.com/PikachuGits/keytone", "PikachuGits/keytone"),
+            ("https://github.com/PikachuGits/keytone/", "PikachuGits/keytone"),
+            ("https://github.com/PikachuGits/keytone.git", "PikachuGits/keytone"),
+            ("http://github.com/PikachuGits/keytone", "PikachuGits/keytone"),
+            ("github.com/PikachuGits/keytone", "PikachuGits/keytone"),
+            ("www.github.com/PikachuGits/keytone", "PikachuGits/keytone"),
+            ("git@github.com:PikachuGits/keytone.git", "PikachuGits/keytone"),
+            (
+                "https://github.com/PikachuGits/keytone/releases/tag/v0.3.1",
+                "PikachuGits/keytone",
+            ),
+        ];
+
+        for (input, want) in cases {
+            assert_eq!(normalize_repo(input), want, "输入 {input:?}");
+        }
+    }
 }

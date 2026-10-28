@@ -636,13 +636,13 @@
           <h2>更新</h2>
           <div class="row">
             <span class="lbl">更新源</span>
-            <input type="text" id="repoInput" placeholder="GitHub 仓库，例如 owner/repo" />
+            <input type="text" id="repoInput" placeholder="owner/repo 或完整仓库地址" />
             <button class="btn" id="saveRepoBtn">保存</button>
           </div>
           <div class="row" style="margin-top:12px">
             <button class="btn primary" id="checkUpdateBtn">检查更新</button>
           </div>
-          <div class="note">留空表示不检查。填写后从该仓库的 GitHub Releases 读取最新版本。</div>
+          <div class="note">留空表示不检查。填 <b>owner/repo</b> 或直接粘 <b>https://github.com/owner/repo</b> 都行，保存时会自动裁成 owner/repo。</div>
         </div>
 
         <div class="card">
