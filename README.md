@@ -408,6 +408,16 @@ identifier "com.keytone.app" and certificate root = H"533f0e70..."
 
 ---
 
+## 贡献
+
+欢迎提 PR。`main` 分支已开启保护：请 fork 后切分支，走 Pull Request，
+CI 的 `CI / macOS` 与 `CI / Windows` 两项检查通过、review 通过后合并。
+
+流程、本地检查命令和平台相关的坑（尤其是 Windows 上的 WebView2 主线程问题）
+见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+---
+
 ## 许可
 
 代码以 MIT 许可发布，详见 [LICENSE](LICENSE)。
